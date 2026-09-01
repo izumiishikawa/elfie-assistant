@@ -84,12 +84,12 @@ export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
         body: JSON.stringify(input),
       });
       const data = await res.json();
-      if (!res.ok) return { ok: false, error: data.error || 'Erro ao criar automação.' };
+      if (!res.ok) return { ok: false, error: data.error || 'Failed to create automation.' };
       await get().loadWorkflows();
       return { ok: true, workflow: data };
     } catch (err) {
       console.error('[createWorkflow]', err);
-      return { ok: false, error: 'Erro ao criar automação.' };
+      return { ok: false, error: 'Failed to create automation.' };
     }
   },
   updateWorkflow: async (id, input) => {
@@ -100,12 +100,12 @@ export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
         body: JSON.stringify(input),
       });
       const data = await res.json();
-      if (!res.ok) return { ok: false, error: data.error || 'Erro ao salvar automação.' };
+      if (!res.ok) return { ok: false, error: data.error || 'Failed to save automation.' };
       await get().loadWorkflows();
       return { ok: true, workflow: data };
     } catch (err) {
       console.error('[updateWorkflow]', err);
-      return { ok: false, error: 'Erro ao salvar automação.' };
+      return { ok: false, error: 'Failed to save automation.' };
     }
   },
   deleteWorkflow: async (id) => {
@@ -124,12 +124,12 @@ export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
         body: JSON.stringify({ payload: payload ?? {} }),
       });
       const data = await res.json();
-      if (!res.ok) return { ok: false, error: data.error || 'Erro ao testar automação.' };
+      if (!res.ok) return { ok: false, error: data.error || 'Failed to test automation.' };
       await get().loadRuns(id);
       return { ok: true, run: data };
     } catch (err) {
       console.error('[runWorkflowNow]', err);
-      return { ok: false, error: 'Erro ao testar automação.' };
+      return { ok: false, error: 'Failed to test automation.' };
     }
   },
   loadRuns: async (id) => {
@@ -145,12 +145,12 @@ export const useWorkflowsStore = create<WorkflowsStore>((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/api/workflows/${id}/regenerate-webhook`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) return { ok: false, error: data.error || 'Erro ao regenerar webhook.' };
+      if (!res.ok) return { ok: false, error: data.error || 'Failed to regenerate webhook.' };
       await get().loadWorkflows();
       return { ok: true, workflow: data };
     } catch (err) {
       console.error('[regenerateWebhook]', err);
-      return { ok: false, error: 'Erro ao regenerar webhook.' };
+      return { ok: false, error: 'Failed to regenerate webhook.' };
     }
   },
 }));

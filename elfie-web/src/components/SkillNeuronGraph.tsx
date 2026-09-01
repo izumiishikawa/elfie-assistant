@@ -85,7 +85,7 @@ function buildGraphData(
 
   const cx = scale / 2;
   const cy = scale / 2;
-  const nodes: SimNode[] = [{ id: 'core', kind: 'core', label: aiName || 'núcleo', radius: coreR, x: cx, y: cy }];
+  const nodes: SimNode[] = [{ id: 'core', kind: 'core', label: aiName || 'Core', radius: coreR, x: cx, y: cy }];
   const links: SimLink[] = [];
 
   const ungrouped = skills.filter((s) => !s.packageId);
@@ -222,7 +222,7 @@ export default function SkillNeuronGraph({
   onOpenKnowledgeFile,
   onOpenIntegration,
   showLabels = true,
-  emptyMessage = 'Nenhuma skill cadastrada',
+  emptyMessage = 'No skills added yet',
   zoomPan = true,
 }: {
   packages: SkillPackage[];
@@ -450,7 +450,7 @@ export default function SkillNeuronGraph({
           onClick={resetView}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.92 }}
-          title="Centralizar grafo"
+          title="Center graph"
           className="absolute bottom-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-lg bg-foreground border-none cursor-pointer text-gray-400 hover:text-white transition-colors"
         >
           <Maximize2 size={13} />

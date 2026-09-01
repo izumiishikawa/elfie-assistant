@@ -151,11 +151,11 @@ const VoicePicker = memo(({ value, onChange, provider }: {
     audio.play().then(() => setPlaying(voice.voice_id)).catch(() => {});
   }, [playing]);
 
-  if (loading) return <p className="text-gray-400 text-[12px]">Carregando vozes...</p>;
-  if (!voices.length) return <p className="text-gray-400 text-[12px]">Nenhuma voz disponível.</p>;
+  if (loading) return <p className="text-gray-400 text-[12px]">Loading voices...</p>;
+  if (!voices.length) return <p className="text-gray-400 text-[12px]">No voices available.</p>;
 
   const grouped = voices.reduce<Record<string, ElevenVoice[]>>((acc, v) => {
-    const key = v.category === 'premade' ? 'Padrão' : 'Suas vozes';
+    const key = v.category === 'premade' ? 'Standard' : 'Your voices';
     (acc[key] ??= []).push(v);
     return acc;
   }, {});
@@ -272,7 +272,7 @@ const PhotoCropModal = memo(({ src, onCancel, onCrop }: {
   return (
     <div className="fixed inset-0 z-[500] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}>
       <div className="bg-background rounded-2xl p-5 flex flex-col items-center gap-4" style={{ width: CROP_VIEWPORT + 40 }}>
-        <span className="text-white font-semibold text-[14px]">Ajustar foto</span>
+        <span className="text-white font-semibold text-[14px]">Adjust photo</span>
         <div
           className="relative overflow-hidden rounded-2xl bg-foreground cursor-move touch-none select-none"
           style={{ width: CROP_VIEWPORT, height: CROP_VIEWPORT }}
@@ -303,7 +303,7 @@ const PhotoCropModal = memo(({ src, onCancel, onCrop }: {
             style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.4)', borderRadius: '50%' }}
           />
         </div>
-        <p className="text-gray-300 text-[11px] m-0 text-center">Arraste pra posicionar, use o scroll pra dar zoom</p>
+        <p className="text-gray-300 text-[11px] m-0 text-center">Drag to reposition, scroll to zoom</p>
         <div className="flex gap-2 w-full">
           <motion.button
             onClick={onCancel}
@@ -311,7 +311,7 @@ const PhotoCropModal = memo(({ src, onCancel, onCrop }: {
             whileTap={{ scale: 0.96 }}
             className="flex-1 py-2.5 rounded-full bg-foreground border-none cursor-pointer"
           >
-            <span className="text-gray-300 font-semibold text-[12px]">Cancelar</span>
+            <span className="text-gray-300 font-semibold text-[12px]">Cancel</span>
           </motion.button>
           <motion.button
             onClick={applyCrop}
@@ -319,7 +319,7 @@ const PhotoCropModal = memo(({ src, onCancel, onCrop }: {
             whileTap={{ scale: 0.96 }}
             className="flex-1 py-2.5 rounded-full bg-accent border-none cursor-pointer"
           >
-            <span className="text-white font-semibold text-[12px]">Usar foto</span>
+            <span className="text-white font-semibold text-[12px]">Use photo</span>
           </motion.button>
         </div>
       </div>
@@ -364,7 +364,7 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
   }, [cropSrc]);
 
   const save = useCallback(async () => {
-    if (!name.trim()) { window.alert('Nome obrigatório.'); return; }
+    if (!name.trim()) { window.alert('Name is required.'); return; }
     setSaving(true);
     try {
       const body: Record<string, unknown> = { name: name.trim(), personality, model, voiceId };
@@ -378,17 +378,17 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
       });
       if (!res.ok) throw new Error();
       onSaved();
-    } catch { window.alert('Erro ao salvar.'); }
+    } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
   }, [name, personality, model, voiceId, localPhoto, character, onSaved]);
 
   const deleteCharacter = useCallback(async () => {
     if (!character?._id) return;
-    if (!window.confirm(`Apagar "${character.name}"?`)) return;
+    if (!window.confirm(`Delete "${character.name}"?`)) return;
     try {
       await fetch(`${API_BASE}/api/characters/${character._id}`, { method: 'DELETE' });
       onSaved();
-    } catch { window.alert('Erro ao apagar.'); }
+    } catch { window.alert('Failed to delete.'); }
   }, [character, onSaved]);
 
   return (
@@ -406,7 +406,7 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
           <ChevronLeft size={16} color="#888" />
         </motion.button>
         <span className="text-white font-semibold text-[14px] flex-1 truncate">
-          {character?._id ? 'Editar personagem' : 'Novo personagem'}
+          {character?._id ? 'Edit character' : 'New character'}
         </span>
         <motion.button
           onClick={save}
@@ -415,7 +415,7 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -439,36 +439,36 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
             </div>
           </button>
           <div className="flex-1 min-w-0">
-            <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0">NOME</p>
+            <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0">NAME</p>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Nome do personagem"
+              placeholder="Character name"
               className="text-white text-[17px] font-bold bg-transparent border-none outline-none w-full placeholder:text-gray-400"
             />
           </div>
         </div>
 
         <div className="mb-5">
-          <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">PERSONALIDADE</p>
+          <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">PERSONALITY</p>
           <textarea
             value={personality}
             onChange={(e) => setPersonality(e.target.value)}
-            placeholder="Descreva a personalidade, tom e jeito de ser..."
+            placeholder="Describe the personality, tone, and vibe..."
             className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
             style={{ minHeight: 220 }}
           />
-          <p className="text-gray-300 text-[11px] mt-1.5 m-0">Se vazio, usa a personalidade padrão.</p>
+          <p className="text-gray-300 text-[11px] mt-1.5 m-0">If empty, uses the default personality.</p>
         </div>
 
         <div className="mb-5">
-          <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">MODELO DE IA</p>
+          <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">AI MODEL</p>
           <input
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            placeholder="Padrão do servidor"
+            placeholder="Server default"
             className="text-white text-[13px] bg-transparent border-b border-foreground outline-none w-full pb-2 mb-3 placeholder:text-gray-400"
           />
           <div className="flex flex-wrap gap-1.5">
@@ -490,19 +490,19 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
 
         <div className="mb-5">
           <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">
-            VOZ ({ttsProvider === 'fishaudio' ? 'FISH AUDIO' : 'ELEVENLABS'})
+            VOICE ({ttsProvider === 'fishaudio' ? 'FISH AUDIO' : 'ELEVENLABS'})
           </p>
           <input
             type="text"
             value={voiceId}
             onChange={(e) => setVoiceId(e.target.value.trim())}
-            placeholder={ttsProvider === 'fishaudio' ? 'ID do modelo (reference_id)' : 'ID da voz (voice_id)'}
+            placeholder={ttsProvider === 'fishaudio' ? 'Model ID (reference_id)' : 'Voice ID (voice_id)'}
             className="text-white text-[13px] bg-transparent border-b border-foreground outline-none w-full pb-2 mb-3 placeholder:text-gray-400"
             autoComplete="off"
             spellCheck={false}
           />
           <VoicePicker value={voiceId} onChange={setVoiceId} provider={ttsProvider} />
-          {!voiceId && <p className="text-gray-300 text-[11px] mt-1.5 m-0">Se vazia, usa a voz padrão do servidor.</p>}
+          {!voiceId && <p className="text-gray-300 text-[11px] mt-1.5 m-0">If empty, uses the server default voice.</p>}
         </div>
 
         {character?._id && (
@@ -513,7 +513,7 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
             className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
           >
             <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Apagar personagem</span>
+            <span className="text-destructive font-semibold text-[12px]">Delete character</span>
           </motion.button>
         )}
       </div>
@@ -527,7 +527,7 @@ const PARAM_LOCATIONS: SkillParamLocation[] = ['path', 'query', 'header', 'body'
 const PARAM_TYPES: SkillParamType[] = ['string', 'number', 'boolean'];
 const SKILL_NAME_RE = /^[a-z0-9_]+$/;
 const AUTH_TYPES: [SkillAuthType, string][] = [
-  ['none', 'Nenhuma'], ['bearer', 'Bearer Token'], ['apiKeyHeader', 'Header customizado'], ['basic', 'Basic Auth'],
+  ['none', 'None'], ['bearer', 'Bearer Token'], ['apiKeyHeader', 'Custom header'], ['basic', 'Basic Auth'],
 ];
 
 const fieldLabel = 'text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0';
@@ -577,7 +577,7 @@ const PackageCard = memo(({ pkg, count, idx, onOpen, onEdit }: {
       <p className="text-white text-[13px] font-semibold m-0 truncate pr-4">{pkg.name}</p>
     </div>
     <p className="text-gray-400 text-[11px] leading-4 m-0 overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-      {pkg.description || 'Sem descrição.'}
+      {pkg.description || 'No description.'}
     </p>
     <p className="text-gray-500 text-[10px] font-semibold tracking-wide m-0">
       {count} {count === 1 ? 'skill' : 'skills'}
@@ -631,7 +631,7 @@ const PackageEditor = memo(({ pkg, onClose, onSaved, onDeleted }: {
   const save = useCallback(async () => {
     const trimmedName = name.trim();
     if (!trimmedName || !SKILL_NAME_RE.test(trimmedName)) {
-      setError('Nome inválido — use apenas letras minúsculas, números e "_".');
+      setError('Invalid name — use only lowercase letters, numbers, and "_".');
       return;
     }
     setError('');
@@ -644,19 +644,19 @@ const PackageEditor = memo(({ pkg, onClose, onSaved, onDeleted }: {
         body: JSON.stringify({ name: trimmedName, description }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Erro ao salvar.'); return; }
+      if (!res.ok) { setError(data.error || 'Failed to save.'); return; }
       onSaved();
-    } catch { setError('Erro ao salvar.'); }
+    } catch { setError('Failed to save.'); }
     finally { setSaving(false); }
   }, [name, description, isNew, pkg, onSaved]);
 
   const remove = useCallback(async () => {
     if (!pkg?._id) return;
-    if (!window.confirm(`Apagar pacote "${pkg.name}"? As skills dele voltam a ficar sem pacote.`)) return;
+    if (!window.confirm(`Delete package "${pkg.name}"? Its skills will become unpackaged.`)) return;
     try {
       await fetch(`${API_BASE}/api/skill-packages/${pkg._id}`, { method: 'DELETE' });
       onDeleted();
-    } catch { window.alert('Erro ao apagar.'); }
+    } catch { window.alert('Failed to delete.'); }
   }, [pkg, onDeleted]);
 
   return (
@@ -671,7 +671,7 @@ const PackageEditor = memo(({ pkg, onClose, onSaved, onDeleted }: {
           <ChevronLeft size={16} color="#888" />
         </motion.button>
         <span className="text-white font-semibold text-[14px] flex-1 truncate">
-          {isNew ? 'Novo pacote' : 'Editar pacote'}
+          {isNew ? 'New package' : 'Edit package'}
         </span>
         <motion.button
           onClick={save}
@@ -680,7 +680,7 @@ const PackageEditor = memo(({ pkg, onClose, onSaved, onDeleted }: {
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -692,30 +692,30 @@ const PackageEditor = memo(({ pkg, onClose, onSaved, onDeleted }: {
         )}
 
         <div className="mb-5">
-          <p className={fieldLabel}>NOME (IDENTIFICADOR)</p>
+          <p className={fieldLabel}>NAME (IDENTIFIER)</p>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="ex: crm"
+            placeholder="e.g. crm"
             className={smallInput}
           />
           <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-            Apenas letras minúsculas, números e "_".
+            Only lowercase letters, numbers, and "_".
           </p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>DESCRIÇÃO</p>
+          <p className={fieldLabel}>DESCRIPTION</p>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Quando a IA deve abrir esse pacote..."
+            placeholder="When the AI should open this package..."
             className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
             style={{ minHeight: 100 }}
           />
           <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-            É isso que diz à IA quando abrir esse pacote — seja específico.
+            This tells the AI when to open this package — be specific.
           </p>
         </div>
 
@@ -727,7 +727,7 @@ const PackageEditor = memo(({ pkg, onClose, onSaved, onDeleted }: {
             className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
           >
             <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Apagar pacote</span>
+            <span className="text-destructive font-semibold text-[12px]">Delete package</span>
           </motion.button>
         )}
       </div>
@@ -783,8 +783,8 @@ const VoicePresetEditor = memo(({ preset, onClose, onSaved, onDeleted }: {
   const save = useCallback(async () => {
     const trimmedName = name.trim();
     const trimmedVoiceId = voiceId.trim();
-    if (!trimmedName) { setError('Nome é obrigatório.'); return; }
-    if (!trimmedVoiceId) { setError('Voice ID é obrigatório.'); return; }
+    if (!trimmedName) { setError('Name is required.'); return; }
+    if (!trimmedVoiceId) { setError('Voice ID is required.'); return; }
     setError('');
     setSaving(true);
     try {
@@ -795,19 +795,19 @@ const VoicePresetEditor = memo(({ preset, onClose, onSaved, onDeleted }: {
         body: JSON.stringify({ name: trimmedName, voiceId: trimmedVoiceId, provider }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Erro ao salvar.'); return; }
+      if (!res.ok) { setError(data.error || 'Failed to save.'); return; }
       onSaved();
-    } catch { setError('Erro ao salvar.'); }
+    } catch { setError('Failed to save.'); }
     finally { setSaving(false); }
   }, [name, voiceId, provider, isNew, preset, onSaved]);
 
   const remove = useCallback(async () => {
     if (!preset?._id) return;
-    if (!window.confirm(`Apagar a voz "${preset.name}"?`)) return;
+    if (!window.confirm(`Delete the voice "${preset.name}"?`)) return;
     try {
       await fetch(`${API_BASE}/api/voice-presets/${preset._id}`, { method: 'DELETE' });
       onDeleted();
-    } catch { window.alert('Erro ao apagar.'); }
+    } catch { window.alert('Failed to delete.'); }
   }, [preset, onDeleted]);
 
   return (
@@ -822,7 +822,7 @@ const VoicePresetEditor = memo(({ preset, onClose, onSaved, onDeleted }: {
           <ChevronLeft size={16} color="#888" />
         </motion.button>
         <span className="text-white font-semibold text-[14px] flex-1 truncate">
-          {isNew ? 'Nova voz' : 'Editar voz'}
+          {isNew ? 'New voice' : 'Edit voice'}
         </span>
         <motion.button
           onClick={save}
@@ -831,7 +831,7 @@ const VoicePresetEditor = memo(({ preset, onClose, onSaved, onDeleted }: {
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -843,21 +843,21 @@ const VoicePresetEditor = memo(({ preset, onClose, onSaved, onDeleted }: {
         )}
 
         <div className="mb-5">
-          <p className={fieldLabel}>NOME</p>
+          <p className={fieldLabel}>NAME</p>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="ex: Robótica"
+            placeholder="e.g. Robotics"
             className={smallInput}
           />
           <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-            É por esse nome que ela reconhece a voz quando você (ou ela mesma, via change_voice) pedir pra trocar.
+            This is the name she'll recognize to switch voices when you (or she) call change_voice.
           </p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>PROVEDOR</p>
+          <p className={fieldLabel}>PROVIDER</p>
           <div className="flex gap-2">
             {VOICE_PROVIDERS.map((p) => (
               <button
@@ -876,12 +876,12 @@ const VoicePresetEditor = memo(({ preset, onClose, onSaved, onDeleted }: {
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>{provider === 'fishaudio' ? 'ID DO MODELO (REFERENCE_ID)' : 'ID DA VOZ (VOICE_ID)'}</p>
+          <p className={fieldLabel}>{provider === 'fishaudio' ? 'MODEL ID (REFERENCE_ID)' : 'VOICE ID (VOICE_ID)'}</p>
           <input
             type="text"
             value={voiceId}
             onChange={(e) => setVoiceId(e.target.value)}
-            placeholder={provider === 'fishaudio' ? 'ID do modelo (reference_id)' : 'ID da voz (voice_id)'}
+            placeholder={provider === 'fishaudio' ? 'Model ID (reference_id)' : 'Voice ID (voice_id)'}
             className={smallInput}
           />
         </div>
@@ -894,7 +894,7 @@ const VoicePresetEditor = memo(({ preset, onClose, onSaved, onDeleted }: {
             className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
           >
             <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Apagar voz</span>
+            <span className="text-destructive font-semibold text-[12px]">Delete voice</span>
           </motion.button>
         )}
       </div>
@@ -950,11 +950,11 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
   const save = useCallback(async () => {
     const trimmedName = name.trim();
     if (!trimmedName || !SKILL_NAME_RE.test(trimmedName)) {
-      setError('Nome inválido — use apenas letras minúsculas, números e "_".');
+      setError('Invalid name — use only lowercase letters, numbers, and "_".');
       return;
     }
     if (!urlTemplate.trim()) {
-      setError('URL obrigatória.');
+      setError('URL is required.');
       return;
     }
     setError('');
@@ -973,19 +973,19 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Erro ao salvar.'); return; }
+      if (!res.ok) { setError(data.error || 'Failed to save.'); return; }
       onSaved();
-    } catch { setError('Erro ao salvar.'); }
+    } catch { setError('Failed to save.'); }
     finally { setSaving(false); }
   }, [name, description, packageId, method, urlTemplate, authType, authHeaderName, authValue, headers, params, enabled, requiresConfirmation, alwaysVisible, responseMode, imageUrlField, isNew, skill, onSaved]);
 
   const removeSkill = useCallback(async () => {
     if (!skill?._id) return;
-    if (!window.confirm(`Apagar skill "${skill.name}"?`)) return;
+    if (!window.confirm(`Delete skill "${skill.name}"?`)) return;
     try {
       await fetch(`${API_BASE}/api/skills/${skill._id}`, { method: 'DELETE' });
       onSaved();
-    } catch { window.alert('Erro ao apagar.'); }
+    } catch { window.alert('Failed to delete.'); }
   }, [skill, onSaved]);
 
   const runTest = useCallback(async () => {
@@ -1000,7 +1000,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
       });
       setTestResult(await res.json());
     } catch {
-      setTestResult({ ok: false, status: 0, durationMs: 0, body: 'Falha ao executar teste.' });
+      setTestResult({ ok: false, status: 0, durationMs: 0, body: 'Failed to run test.' });
     } finally { setTesting(false); }
   }, [skill, sampleArgs]);
 
@@ -1018,7 +1018,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
           <ChevronLeft size={16} color="#888" />
         </motion.button>
         <span className="text-white font-semibold text-[14px] flex-1 truncate">
-          {isNew ? 'Nova skill' : 'Editar skill'}
+          {isNew ? 'New skill' : 'Edit skill'}
         </span>
         <motion.button
           onClick={save}
@@ -1027,7 +1027,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -1039,52 +1039,52 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
         )}
 
         <div className="mb-5">
-          <p className={fieldLabel}>NOME (IDENTIFICADOR)</p>
+          <p className={fieldLabel}>NAME (IDENTIFIER)</p>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="ex: criar_tarefa"
+            placeholder="e.g. create_task"
             className={smallInput}
           />
           <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-            Apenas letras minúsculas, números e "_". É o identificador interno da skill.
+            Only lowercase letters, numbers, and "_". This is the skill's internal identifier.
           </p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>DESCRIÇÃO</p>
+          <p className={fieldLabel}>DESCRIPTION</p>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Descreva o que essa skill faz e QUANDO a IA deve usá-la..."
+            placeholder="Describe what this skill does and WHEN the AI should use it..."
             className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
             style={{ minHeight: 100 }}
           />
           <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-            É isso que diz à IA quando usar essa skill — seja específico.
+            This tells the AI when to use this skill — be specific.
           </p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>PACOTE</p>
+          <p className={fieldLabel}>PACKAGE</p>
           <select
             value={packageId}
             onChange={(e) => setPackageId(e.target.value)}
             className={smallInput}
           >
-            <option value="">Nenhum (sempre visível)</option>
+            <option value="">None (always visible)</option>
             {packages.map((pkg) => (
               <option key={pkg._id} value={pkg._id}>{pkg.name}</option>
             ))}
           </select>
           <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-            Skills sem pacote ficam sempre visíveis para a IA. Skills num pacote só aparecem depois que a IA abrir esse pacote.
+            Skills without a package are always visible to the AI. Skills in a package only appear after the AI opens that package.
           </p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>MÉTODO E URL</p>
+          <p className={fieldLabel}>METHOD AND URL</p>
           <div className="flex gap-2 mb-1.5">
             <select
               value={method}
@@ -1097,17 +1097,17 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
               type="text"
               value={urlTemplate}
               onChange={(e) => setUrlTemplate(e.target.value)}
-              placeholder="https://api.exemplo.com/tarefas/{id}"
+              placeholder="https://api.example.com/tasks/{id}"
               className={`${smallInput} flex-1`}
             />
           </div>
           <p className="text-gray-300 text-[11px] m-0">
-            {'Use {nome} na URL para parâmetros de path (ex: /tarefas/{id}).'}
+            {'Use {name} in the URL for path parameters (e.g. /tasks/{id}).'}
           </p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>AUTENTICAÇÃO</p>
+          <p className={fieldLabel}>AUTHENTICATION</p>
           <div className="flex gap-1.5 mb-2 flex-wrap">
             {AUTH_TYPES.map(([val, label]) => (
               <motion.button
@@ -1128,7 +1128,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
               type="text"
               value={authHeaderName}
               onChange={(e) => setAuthHeaderName(e.target.value)}
-              placeholder="Nome do header (ex: X-API-Key)"
+              placeholder="Header name (e.g. X-API-Key)"
               className={`${smallInput} mb-2`}
             />
           )}
@@ -1137,7 +1137,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
               type="password"
               value={authValue}
               onChange={(e) => setAuthValue(e.target.value)}
-              placeholder={skill?.hasAuthValue ? '•••• (mantido — deixe em branco para não alterar)' : authType === 'basic' ? 'usuario:senha' : 'valor do token'}
+              placeholder={skill?.hasAuthValue ? '•••• (kept — leave blank to not change)' : authType === 'basic' ? 'username:password' : 'token value'}
               className={smallInput}
               autoComplete="off"
             />
@@ -1146,17 +1146,17 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
 
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
-            <p className={`${fieldLabel} mb-0`}>HEADERS ESTÁTICOS</p>
+            <p className={`${fieldLabel} mb-0`}>STATIC HEADERS</p>
             <motion.button
               onClick={addHeader}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className="flex items-center gap-1 px-2.5 py-1 rounded-full border-none cursor-pointer bg-accent/[0.12] hover:bg-accent/20 transition-colors"
             >
-              <Plus size={11} color="var(--accent)" /><span className="text-accent font-semibold text-[11px]">Adicionar</span>
+              <Plus size={11} color="var(--accent)" /><span className="text-accent font-semibold text-[11px]">Add</span>
             </motion.button>
           </div>
-          {headers.length === 0 && <p className="text-gray-500 text-[12px] m-0">Nenhum header.</p>}
+          {headers.length === 0 && <p className="text-gray-500 text-[12px] m-0">No headers.</p>}
           <div className="flex flex-col gap-1.5">
             <AnimatePresence initial={false}>
               {headers.map((h, idx) => (
@@ -1170,7 +1170,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
                   className="flex items-center gap-1.5"
                 >
                   <input type="text" value={h.key} onChange={(e) => updateHeader(idx, { key: e.target.value })} placeholder="Header" className={`${smallInput} flex-1`} />
-                  <input type="text" value={h.value} onChange={(e) => updateHeader(idx, { value: e.target.value })} placeholder="Valor" className={`${smallInput} flex-1`} />
+                  <input type="text" value={h.value} onChange={(e) => updateHeader(idx, { value: e.target.value })} placeholder="Value" className={`${smallInput} flex-1`} />
                   <motion.button
                     onClick={() => removeHeader(idx)}
                     whileHover={{ scale: 1.15 }}
@@ -1187,18 +1187,18 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
 
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
-            <p className={`${fieldLabel} mb-0`}>PARÂMETROS</p>
+            <p className={`${fieldLabel} mb-0`}>PARAMETERS</p>
             <button
               onClick={addParam}
               className="flex items-center gap-1 px-2.5 py-1 rounded-full border-none cursor-pointer bg-accent/[0.12] hover:bg-accent/20 transition-colors"
             >
-              <Plus size={11} color="var(--accent)" /><span className="text-accent font-semibold text-[11px]">Adicionar</span>
+              <Plus size={11} color="var(--accent)" /><span className="text-accent font-semibold text-[11px]">Add</span>
             </button>
           </div>
           <p className="text-gray-300 text-[11px] mt-0 mb-2">
-            A descrição de cada parâmetro é o que orienta a IA a preenchê-lo corretamente.
+            Each parameter's description is what guides the AI to fill it in correctly.
           </p>
-          {params.length === 0 && <p className="text-gray-500 text-[12px] m-0">Nenhum parâmetro.</p>}
+          {params.length === 0 && <p className="text-gray-500 text-[12px] m-0">No parameters.</p>}
           <div className="flex flex-col gap-2">
             <AnimatePresence initial={false}>
               {params.map((p, idx) => (
@@ -1216,7 +1216,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
                       type="text"
                       value={p.name}
                       onChange={(e) => updateParam(idx, { name: e.target.value })}
-                      placeholder="nome"
+                      placeholder="name"
                       className="text-white text-[12px] bg-background border border-foreground rounded-lg px-2.5 py-1.5 outline-none flex-1 placeholder:text-gray-400"
                     />
                     <select
@@ -1235,7 +1235,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
                     </select>
                     <label className="flex items-center gap-1 flex-shrink-0 cursor-pointer">
                       <input type="checkbox" checked={p.required} onChange={(e) => updateParam(idx, { required: e.target.checked })} />
-                      <span className="text-gray-400 text-[10px]">obrig.</span>
+                      <span className="text-gray-400 text-[10px]">req.</span>
                     </label>
                     <motion.button
                       onClick={() => removeParam(idx)}
@@ -1250,7 +1250,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
                     type="text"
                     value={p.description}
                     onChange={(e) => updateParam(idx, { description: e.target.value })}
-                    placeholder="O que a IA deve preencher aqui..."
+                    placeholder="What the AI should fill in here..."
                     className="text-white text-[12px] bg-background border border-foreground rounded-lg px-2.5 py-1.5 outline-none w-full placeholder:text-gray-400"
                   />
                 </motion.div>
@@ -1261,17 +1261,17 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
 
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className={`${fieldLabel} mb-0.5`}>ATIVA</p>
-            <p className="text-gray-300 text-[11px] m-0">Skills desativadas não são usadas pela IA.</p>
+            <p className={`${fieldLabel} mb-0.5`}>ACTIVE</p>
+            <p className="text-gray-300 text-[11px] m-0">Disabled skills aren't used by the AI.</p>
           </div>
           <Switch checked={enabled} onChange={() => setEnabled((v) => !v)} />
         </div>
 
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className={`${fieldLabel} mb-0.5`}>PEDIR CONFIRMAÇÃO</p>
+            <p className={`${fieldLabel} mb-0.5`}>ASK FOR CONFIRMATION</p>
             <p className="text-gray-300 text-[11px] m-0">
-              Antes de chamar essa skill de verdade, a IA para e mostra a chamada pra você aprovar, recusar ou pedir mudanças no chat.
+              Before actually calling this skill, the AI pauses and shows you the call so you can approve, reject, or request changes in chat.
             </p>
           </div>
           <Switch checked={requiresConfirmation} onChange={() => setRequiresConfirmation((v) => !v)} />
@@ -1279,11 +1279,11 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
 
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className={`${fieldLabel} mb-0.5`}>SEMPRE VISÍVEL</p>
+            <p className={`${fieldLabel} mb-0.5`}>ALWAYS VISIBLE</p>
             <p className="text-gray-300 text-[11px] m-0">
-              Normalmente a IA só enxerga essa skill depois de decidir abrir seu conjunto de ferramentas
-              (economiza tokens em conversas comuns). Ative isso só se ela precisa perceber sozinha quando
-              usar essa skill, sem você pedir de forma explícita — igual memória e busca no conhecimento.
+              Normally the AI only sees this skill after deciding to open its toolset
+              (saves tokens in everyday conversations). Turn this on only if she needs to notice on her own when to
+              use this skill, without you asking explicitly — like memory and knowledge search.
             </p>
           </div>
           <Switch checked={alwaysVisible} onChange={() => setAlwaysVisible((v) => !v)} />
@@ -1291,11 +1291,11 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
 
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className={`${fieldLabel} mb-0.5`}>RESPOSTA É UMA IMAGEM</p>
+            <p className={`${fieldLabel} mb-0.5`}>RESPONSE IS AN IMAGE</p>
             <p className="text-gray-300 text-[11px] m-0">
-              Em vez de devolver o texto da resposta pra IA ler, o resultado é baixado e enviado como imagem
-              direto no chat — use pra qualquer skill que busca/gera uma imagem (ex.: um buscador de imagens
-              numa API externa).
+              Instead of returning the response text for the AI to read, the result is downloaded and sent as an image
+              directly in chat — use this for any skill that fetches or generates an image (e.g. an image search
+              in an external API).
             </p>
           </div>
           <Switch checked={responseMode === 'image'} onChange={() => setResponseMode((v) => (v === 'image' ? 'text' : 'image'))} />
@@ -1303,25 +1303,25 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
 
         {responseMode === 'image' && (
           <div className="mb-5">
-            <p className={fieldLabel}>CAMPO DA URL DA IMAGEM (opcional)</p>
+            <p className={fieldLabel}>IMAGE URL FIELD (optional)</p>
             <input
               type="text"
               value={imageUrlField}
               onChange={(e) => setImageUrlField(e.target.value)}
-              placeholder="ex.: file_url ou items.0.url"
+              placeholder="e.g. file_url or items.0.url"
               className={smallInput}
             />
             <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-              Se a API responde com JSON contendo a URL da imagem (não a imagem em si), diga aqui o caminho
-              até esse campo. Deixe em branco se a própria resposta da chamada já for os bytes da imagem.
+              If the API responds with JSON containing the image URL (not the image itself), enter the path
+              to that field here. Leave blank if the call's response is already the raw image bytes.
             </p>
           </div>
         )}
 
         <div className="mb-5 pt-4 border-t border-foreground">
-          <p className={fieldLabel}>TESTAR</p>
+          <p className={fieldLabel}>TEST</p>
           {isNew ? (
-            <p className="text-gray-500 text-[12px] m-0">Salve a skill primeiro para poder testá-la.</p>
+            <p className="text-gray-500 text-[12px] m-0">Save the skill first to be able to test it.</p>
           ) : (
             <>
               {namedParams.length > 0 && (
@@ -1333,7 +1333,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
                         type="text"
                         value={sampleArgs[p.name] ?? ''}
                         onChange={(e) => setSampleArgs((prev) => ({ ...prev, [p.name]: e.target.value }))}
-                        placeholder={p.description || 'valor de teste'}
+                        placeholder={p.description || 'test value'}
                         className={`${smallInput} flex-1`}
                       />
                     </div>
@@ -1348,7 +1348,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20 disabled:opacity-50"
               >
                 {testing ? <Spinner /> : <Play size={11} color="var(--accent)" />}
-                <span className="text-accent font-semibold text-[12px]">Executar teste</span>
+                <span className="text-accent font-semibold text-[12px]">Run test</span>
               </motion.button>
               <AnimatePresence>
                 {testResult && (
@@ -1380,7 +1380,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
             className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
           >
             <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Apagar skill</span>
+            <span className="text-destructive font-semibold text-[12px]">Delete skill</span>
           </motion.button>
         )}
       </div>
@@ -1389,7 +1389,7 @@ const SkillEditor = memo(({ skill, packages, onClose, onSaved }: {
 });
 
 
-const DAY_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 function routineScheduleText(routine: Pick<Routine, 'hour' | 'minute' | 'daysOfWeek' | 'runOnce' | 'scheduledDate'>) {
@@ -1398,9 +1398,9 @@ function routineScheduleText(routine: Pick<Routine, 'hour' | 'minute' | 'daysOfW
     const dateLabel = routine.scheduledDate
       ? new Date(routine.scheduledDate).toLocaleDateString('pt-BR')
       : '?';
-    return `${time} · uma vez em ${dateLabel}`;
+    return `${time} · once on ${dateLabel}`;
   }
-  if (routine.daysOfWeek.length === 0 || routine.daysOfWeek.length === 7) return `${time} · todo dia`;
+  if (routine.daysOfWeek.length === 0 || routine.daysOfWeek.length === 7) return `${time} · every day`;
   const days = [...routine.daysOfWeek].sort().map((d) => DAY_LABELS[d]).join(', ');
   return `${time} · ${days}`;
 }
@@ -1467,23 +1467,23 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
   }, []);
 
   const save = useCallback(async () => {
-    if (!name.trim()) { setError('Nome obrigatório.'); return; }
-    if (!prompt.trim()) { setError('Prompt obrigatório.'); return; }
+    if (!name.trim()) { setError('Name is required.'); return; }
+    if (!prompt.trim()) { setError('Prompt is required.'); return; }
     const [hourStr, minuteStr] = time.split(':');
     const hour = Number(hourStr), minute = Number(minuteStr);
-    if (!Number.isInteger(hour) || !Number.isInteger(minute)) { setError('Horário inválido.'); return; }
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) { setError('Invalid time.'); return; }
     setError('');
     setSaving(true);
     const input = { name: name.trim(), prompt: prompt.trim(), characterId: characterId || null, hour, minute, daysOfWeek, enabled, notify, forceTts, triggeredWorkflowIds };
     const result = isNew ? await createRoutine(input) : await updateRoutine(routine!._id!, input);
     setSaving(false);
-    if (!result.ok) { setError(result.error || 'Erro ao salvar.'); return; }
+    if (!result.ok) { setError(result.error || 'Failed to save.'); return; }
     onSaved();
   }, [name, prompt, characterId, time, daysOfWeek, enabled, notify, forceTts, triggeredWorkflowIds, isNew, routine, createRoutine, updateRoutine, onSaved]);
 
   const remove = useCallback(async () => {
     if (!routine?._id) return;
-    if (!window.confirm(`Apagar rotina "${routine.name}"?`)) return;
+    if (!window.confirm(`Delete routine "${routine.name}"?`)) return;
     await deleteRoutine(routine._id);
     onSaved();
   }, [routine, deleteRoutine, onSaved]);
@@ -1493,7 +1493,7 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
     setRunning(true);
     setRunResult(null);
     const result = await runRoutineNow(routine._id);
-    setRunResult(result.ok ? 'Executada — confira a conversa.' : (result.error || 'Falhou.'));
+    setRunResult(result.ok ? 'Ran — check the conversation.' : (result.error || 'Failed.'));
     setRunning(false);
   }, [routine, runRoutineNow]);
 
@@ -1509,7 +1509,7 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
           <ChevronLeft size={16} color="#888" />
         </motion.button>
         <span className="text-white font-semibold text-[14px] flex-1 truncate">
-          {isNew ? 'Nova rotina' : 'Editar rotina'}
+          {isNew ? 'New routine' : 'Edit routine'}
         </span>
         <motion.button
           onClick={save}
@@ -1518,7 +1518,7 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -1530,12 +1530,12 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
         )}
 
         <div className="mb-5">
-          <p className={fieldLabel}>NOME</p>
+          <p className={fieldLabel}>NAME</p>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="ex: Bom dia"
+            placeholder="e.g. Good morning"
             className={smallInput}
           />
         </div>
@@ -1545,17 +1545,17 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Instrução que a Elfie vai executar sozinha, ex: dê um bom dia carinhoso e resuma minha agenda de hoje..."
+            placeholder="Instruction Elfie will carry out on her own, e.g. give a warm good morning and summarize today's agenda..."
             className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
             style={{ minHeight: 120 }}
           />
           <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-            Ela pode usar as mesmas ferramentas de uma conversa normal (Gmail, Calendar, busca, etc.) se conectadas.
+            She can use the same tools as a regular conversation (Gmail, Calendar, search, etc.) if connected.
           </p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>HORÁRIO</p>
+          <p className={fieldLabel}>TIME</p>
           <input
             type="time"
             value={time}
@@ -1565,7 +1565,7 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>DIAS DA SEMANA</p>
+          <p className={fieldLabel}>DAYS OF WEEK</p>
           <div className="flex flex-wrap gap-1.5">
             {DAY_LABELS.map((label, d) => (
               <motion.button
@@ -1581,17 +1581,17 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
               </motion.button>
             ))}
           </div>
-          <p className="text-gray-300 text-[11px] mt-1.5 m-0">Nenhum dia selecionado = todo dia.</p>
+          <p className="text-gray-300 text-[11px] mt-1.5 m-0">No day selected = every day.</p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>PERSONAGEM</p>
+          <p className={fieldLabel}>CHARACTER</p>
           <select
             value={characterId}
             onChange={(e) => setCharacterId(e.target.value)}
             className={smallInput}
           >
-            <option value="">Personagem ativo</option>
+            <option value="">Active character</option>
             {characters.map((c) => (
               <option key={c._id} value={c._id}>{c.name}</option>
             ))}
@@ -1600,37 +1600,37 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
 
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className={`${fieldLabel} mb-0.5`}>ATIVA</p>
-            <p className="text-gray-300 text-[11px] m-0">Rotinas desativadas não disparam.</p>
+            <p className={`${fieldLabel} mb-0.5`}>ACTIVE</p>
+            <p className="text-gray-300 text-[11px] m-0">Disabled routines don't trigger.</p>
           </div>
           <Switch checked={enabled} onChange={() => setEnabled((v) => !v)} />
         </div>
 
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className={`${fieldLabel} mb-0.5`}>NOTIFICAÇÃO PUSH</p>
-            <p className="text-gray-300 text-[11px] m-0">Além de salvar no chat, envia uma notificação.</p>
+            <p className={`${fieldLabel} mb-0.5`}>PUSH NOTIFICATION</p>
+            <p className="text-gray-300 text-[11px] m-0">In addition to saving to chat, sends a notification.</p>
           </div>
           <Switch checked={notify} onChange={() => setNotify((v) => !v)} />
         </div>
 
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <p className={`${fieldLabel} mb-0.5`}>FORÇAR TTS</p>
+            <p className={`${fieldLabel} mb-0.5`}>FORCE TTS</p>
             <p className="text-gray-300 text-[11px] m-0">
-              Liga o daemon local, fala a resposta em voz alta e já deixa o microfone ativo.
+              Turns on the local daemon, speaks the response out loud, and leaves the microphone active.
             </p>
           </div>
           <Switch checked={forceTts} onChange={() => setForceTts((v) => !v)} />
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>AUTOMAÇÕES DISPARADAS</p>
+          <p className={fieldLabel}>TRIGGERED AUTOMATIONS</p>
           <p className="text-gray-300 text-[11px] mt-0.5 mb-2 m-0">
-            Além do prompt acima, dispara essas automações sempre que a rotina roda.
+            In addition to the prompt above, triggers these automations every time the routine runs.
           </p>
           {workflows.length === 0 ? (
-            <p className="text-gray-500 text-[12px] m-0">Nenhuma automação cadastrada ainda.</p>
+            <p className="text-gray-500 text-[12px] m-0">No automations created yet.</p>
           ) : (
             <div className="flex flex-col gap-1.5">
               {workflows.map((w) => (
@@ -1653,7 +1653,7 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
 
         {!isNew && (
           <div className="mb-5 pt-4 border-t border-foreground">
-            <p className={fieldLabel}>TESTAR</p>
+            <p className={fieldLabel}>TEST</p>
             <motion.button
               onClick={runNow}
               disabled={running}
@@ -1662,7 +1662,7 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20 disabled:opacity-50"
             >
               {running ? <Spinner /> : <Play size={11} color="var(--accent)" />}
-              <span className="text-accent font-semibold text-[12px]">Executar agora</span>
+              <span className="text-accent font-semibold text-[12px]">Run now</span>
             </motion.button>
             {runResult && <p className="text-gray-300 text-[11px] mt-2 m-0">{runResult}</p>}
           </div>
@@ -1676,7 +1676,7 @@ const RoutineEditor = memo(({ routine, characters, workflows, onClose, onSaved }
             className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
           >
             <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Apagar rotina</span>
+            <span className="text-destructive font-semibold text-[12px]">Delete routine</span>
           </motion.button>
         )}
       </div>
@@ -1689,9 +1689,9 @@ function workflowTriggerLabel(workflow: Pick<Workflow, 'nodes'>) {
   const types = new Set(workflow.nodes.map((n) => n.type));
   const parts: string[] = [];
   if (types.has('webhook')) parts.push('Webhook');
-  if (types.has('schedule')) parts.push('Agendado');
-  if (types.has('routine')) parts.push('Rotina');
-  return parts.length ? parts.join(' + ') : 'Sem gatilho';
+  if (types.has('schedule')) parts.push('Scheduled');
+  if (types.has('routine')) parts.push('Routine');
+  return parts.length ? parts.join(' + ') : 'No trigger';
 }
 
 const WorkflowRow = memo(({ workflow, idx, onOpen, onToggle }: {
@@ -1714,7 +1714,7 @@ const WorkflowRow = memo(({ workflow, idx, onOpen, onToggle }: {
     <div className="flex-1 min-w-0">
       <p className="text-white text-[13px] font-semibold m-0 truncate">{workflow.name}</p>
       <p className="text-gray-400 text-[11px] m-0 truncate">
-        {workflowTriggerLabel(workflow)} · {workflow.nodes.length} nó{workflow.nodes.length === 1 ? '' : 's'}
+        {workflowTriggerLabel(workflow)} · {workflow.nodes.length} node{workflow.nodes.length === 1 ? '' : 's'}
       </p>
     </div>
     <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
@@ -1756,7 +1756,7 @@ const FolderCard = memo(({ folder, idx, onOpen, onEdit }: {
       <p className="text-white text-[13px] font-semibold m-0 truncate pr-4">{folder.name}</p>
     </div>
     <p className="text-gray-400 text-[11px] leading-4 m-0 overflow-hidden" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-      {folder.description || 'Sem descrição.'}
+      {folder.description || 'No description.'}
     </p>
     {folder.tags.length > 0 && (
       <div className="flex flex-wrap gap-1">
@@ -1768,7 +1768,7 @@ const FolderCard = memo(({ folder, idx, onOpen, onEdit }: {
       </div>
     )}
     <p className="text-gray-500 text-[10px] font-semibold tracking-wide m-0">
-      {folder.files.length} {folder.files.length === 1 ? 'arquivo' : 'arquivos'}
+      {folder.files.length} {folder.files.length === 1 ? 'file' : 'files'}
     </p>
   </motion.div>
 ));
@@ -1844,20 +1844,20 @@ const FolderEditor = memo(({ folder, onClose, onSaved, onDeleted }: {
 
   const save = useCallback(async () => {
     const trimmedName = name.trim();
-    if (!trimmedName) { setError('Nome da pasta é obrigatório.'); return; }
+    if (!trimmedName) { setError('Folder name is required.'); return; }
     setError('');
     setSaving(true);
     const result = isNew
       ? await createFolder(trimmedName, description, tags)
       : await updateFolder(trimmedName, description, tags);
     setSaving(false);
-    if (!result.ok) { setError(result.error || 'Erro ao salvar.'); return; }
+    if (!result.ok) { setError(result.error || 'Failed to save.'); return; }
     onSaved();
   }, [name, description, tags, isNew, createFolder, updateFolder, onSaved]);
 
   const remove = useCallback(async () => {
     if (!folder?.name) return;
-    if (!window.confirm(`Apagar a pasta "${folder.name}" e todos os arquivos dentro dela? Isso não pode ser desfeito.`)) return;
+    if (!window.confirm(`Delete the folder "${folder.name}" and all files inside it? This cannot be undone.`)) return;
     await deleteFolder(folder.name);
     onDeleted();
   }, [folder, deleteFolder, onDeleted]);
@@ -1874,7 +1874,7 @@ const FolderEditor = memo(({ folder, onClose, onSaved, onDeleted }: {
           <ChevronLeft size={16} color="#888" />
         </motion.button>
         <span className="text-white font-semibold text-[14px] flex-1 truncate">
-          {isNew ? 'Nova pasta de conhecimento' : 'Editar pasta'}
+          {isNew ? 'New knowledge folder' : 'Edit folder'}
         </span>
         <motion.button
           onClick={save}
@@ -1883,7 +1883,7 @@ const FolderEditor = memo(({ folder, onClose, onSaved, onDeleted }: {
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -1895,24 +1895,24 @@ const FolderEditor = memo(({ folder, onClose, onSaved, onDeleted }: {
         )}
 
         <div className="mb-5">
-          <p className={fieldLabel}>NOME DA PASTA (CATEGORIA)</p>
+          <p className={fieldLabel}>FOLDER NAME (CATEGORY)</p>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="ex: receitas"
+            placeholder="e.g. recipes"
             disabled={!isNew}
             className={`${smallInput} disabled:opacity-50`}
           />
-          {!isNew && <p className="text-gray-300 text-[11px] mt-1.5 m-0">O nome da pasta não pode ser alterado depois de criada.</p>}
+          {!isNew && <p className="text-gray-300 text-[11px] mt-1.5 m-0">The folder name can't be changed after it's created.</p>}
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>DESCRIÇÃO</p>
+          <p className={fieldLabel}>DESCRIPTION</p>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Do que se trata essa pasta — ajuda ela a saber quando é relevante..."
+            placeholder="What this folder is about — helps her know when it's relevant..."
             className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
             style={{ minHeight: 80 }}
           />
@@ -1924,7 +1924,7 @@ const FolderEditor = memo(({ folder, onClose, onSaved, onDeleted }: {
             tags={tags}
             onChange={setTags}
             suggestions={tagTaxonomy.map((t) => t.name)}
-            placeholder="comida, cozinha, receitas rápidas..."
+            placeholder="food, cooking, quick recipes..."
           />
         </div>
 
@@ -1936,7 +1936,7 @@ const FolderEditor = memo(({ folder, onClose, onSaved, onDeleted }: {
             className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
           >
             <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Apagar pasta</span>
+            <span className="text-destructive font-semibold text-[12px]">Delete folder</span>
           </motion.button>
         )}
       </div>
@@ -1946,11 +1946,11 @@ const FolderEditor = memo(({ folder, onClose, onSaved, onDeleted }: {
 
 
 const STATUS_LABEL: Record<string, string> = {
-  queued: 'Na fila...',
-  enriching: 'Analisando...',
-  embedding: 'Indexando...',
-  done: 'Pronto',
-  error: 'Erro ao indexar',
+  queued: 'Queued...',
+  enriching: 'Analyzing...',
+  embedding: 'Indexing...',
+  done: 'Ready',
+  error: 'Failed to index',
 };
 
 const IngestStatusBadge = ({ status }: { status: IngestStatus | null }) => {
@@ -1987,7 +1987,7 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
     if (!fileName) return;
     setLoading(true);
     getFileContent(folderName, fileName)
-      .then((c) => { if (c !== null) setContent(c); else setError('Erro ao carregar arquivo.'); })
+      .then((c) => { if (c !== null) setContent(c); else setError('Failed to load file.'); })
       .finally(() => setLoading(false));
     pollFileStatus(folderName, fileName).then(setStatus);
   }, [folderName, fileName, getFileContent, pollFileStatus]);
@@ -2001,20 +2001,20 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
 
   const save = useCallback(async () => {
     const trimmed = filename.trim();
-    if (!trimmed) { setError('Nome do arquivo é obrigatório.'); return; }
-    if (!/\.(txt|md)$/i.test(trimmed)) { setError('O nome precisa terminar em .txt ou .md.'); return; }
+    if (!trimmed) { setError('File name is required.'); return; }
+    if (!/\.(txt|md)$/i.test(trimmed)) { setError('The name must end in .txt or .md.'); return; }
     setError('');
     setSaving(true);
     const result = await saveFile(folderName, trimmed, content);
     setSaving(false);
-    if (!result.ok) { setError(result.error || 'Erro ao salvar.'); return; }
+    if (!result.ok) { setError(result.error || 'Failed to save.'); return; }
     setStatus({ status: 'queued' });
     onSaved();
   }, [folderName, filename, content, saveFile, onSaved]);
 
   const remove = useCallback(async () => {
     if (!fileName) return;
-    if (!window.confirm(`Apagar o arquivo "${fileName}"?`)) return;
+    if (!window.confirm(`Delete the file "${fileName}"?`)) return;
     await deleteFile(folderName, fileName);
     onDeleted();
   }, [folderName, fileName, deleteFile, onDeleted]);
@@ -2031,7 +2031,7 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
           <ChevronLeft size={16} color="#888" />
         </motion.button>
         <span className="text-white font-semibold text-[14px] flex-1 truncate">
-          {isNew ? 'Novo arquivo' : filename}
+          {isNew ? 'New file' : filename}
         </span>
         <IngestStatusBadge status={status} />
         <motion.button
@@ -2041,7 +2041,7 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -2053,27 +2053,27 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
         )}
 
         <div className="mb-5">
-          <p className={fieldLabel}>NOME DO ARQUIVO</p>
+          <p className={fieldLabel}>FILE NAME</p>
           <input
             type="text"
             value={filename}
             onChange={(e) => setFilename(e.target.value)}
-            placeholder="ex: bolo-de-chocolate.md"
+            placeholder="e.g. chocolate-cake.md"
             disabled={!isNew}
             className={`${smallInput} disabled:opacity-50`}
           />
-          <p className="text-gray-300 text-[11px] mt-1.5 m-0">Precisa terminar em .txt ou .md.</p>
+          <p className="text-gray-300 text-[11px] mt-1.5 m-0">Must end in .txt or .md.</p>
         </div>
 
         <div className="mb-5">
-          <p className={fieldLabel}>CONTEÚDO</p>
+          <p className={fieldLabel}>CONTENT</p>
           {loading ? (
             <div className="flex items-center justify-center py-10"><Spinner /></div>
           ) : (
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Conteúdo do arquivo..."
+              placeholder="File content..."
               className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
               style={{ minHeight: 280, fontFamily: 'monospace' }}
             />
@@ -2088,7 +2088,7 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
             className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
           >
             <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Apagar arquivo</span>
+            <span className="text-destructive font-semibold text-[12px]">Delete file</span>
           </motion.button>
         )}
       </div>
@@ -2249,7 +2249,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
 
   const createAndOpenWorkflow = useCallback(async () => {
     setCreatingWorkflow(true);
-    const result = await createWorkflow({ name: 'Nova automação', nodes: [], edges: [] });
+    const result = await createWorkflow({ name: 'New automation', nodes: [], edges: [] });
     setCreatingWorkflow(false);
     if (result.ok && result.workflow) setOpenWorkflowId(result.workflow._id);
   }, [createWorkflow]);
@@ -2267,7 +2267,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
     setReindexMessage(null);
     const result = await reindexKnowledge();
     setReindexing(false);
-    setReindexMessage(result.ok ? `${result.filesIndexed ?? 0} arquivo(s) reindexado(s).` : (result.error ?? 'Erro ao reindexar.'));
+    setReindexMessage(result.ok ? `${result.filesIndexed ?? 0} file(s) reindexed.` : (result.error ?? 'Failed to reindex.'));
   }, [reindexKnowledge]);
 
   const ungroupedSkills = skills.filter((s) => !s.packageId);
@@ -2317,13 +2317,13 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
         if (!r2.ok) throw new Error();
       }
       await loadSettings();
-    } catch { window.alert('Erro ao salvar.'); }
+    } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
   }, [localUserPhoto, activeCharacterId, userName, userBasicData, userCity, loadSettings]);
 
   const detectCity = useCallback(() => {
     if (!navigator.geolocation) {
-      window.alert('Geolocalização não suportada neste navegador.');
+      window.alert('Geolocation is not supported in this browser.');
       return;
     }
     setDetectingCity(true);
@@ -2337,11 +2337,11 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
           const data = await res.json();
           const city = data.city || data.locality || data.principalSubdivision || '';
           if (city) setUserCity(data.countryName ? `${city}, ${data.countryName}` : city);
-          else window.alert('Não foi possível identificar a cidade a partir da sua localização.');
-        } catch { window.alert('Erro ao buscar a cidade.'); }
+          else window.alert('Could not identify the city from your location.');
+        } catch { window.alert('Failed to look up the city.'); }
         finally { setDetectingCity(false); }
       },
-      () => { window.alert('Não foi possível obter sua localização. Verifique as permissões do navegador.'); setDetectingCity(false); },
+      () => { window.alert('Could not get your location. Check your browser permissions.'); setDetectingCity(false); },
       { enableHighAccuracy: false, timeout: 10000 },
     );
   }, []);
@@ -2355,7 +2355,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
         body: JSON.stringify({ longTermMemory: next }),
       });
       if (!r.ok) throw new Error();
-    } catch { window.alert('Erro ao salvar memória.'); }
+    } catch { window.alert('Failed to save memory.'); }
   }, [activeCharacterId]);
 
   const saveProvider = useCallback(async () => {
@@ -2368,7 +2368,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
       });
       if (!r.ok) throw new Error();
       await loadSettings();
-    } catch { window.alert('Erro ao salvar.'); }
+    } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
   }, [llmProvider, deepseekApiKey, deepseekModel, unlimitedTools, loadSettings]);
 
@@ -2381,7 +2381,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
         body: JSON.stringify({ ttsProvider, sttProvider, fishaudioApiKey }),
       });
       if (!r.ok) throw new Error();
-    } catch { window.alert('Erro ao salvar.'); }
+    } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
   }, [ttsProvider, sttProvider, fishaudioApiKey]);
 
@@ -2395,7 +2395,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
       });
       if (!r.ok) throw new Error();
       setGoogleConfigured(!!googleClientId.trim() && !!googleClientSecret.trim());
-    } catch { window.alert('Erro ao salvar.'); }
+    } catch { window.alert('Failed to save.'); }
     finally { setSavingGoogle(false); }
   }, [googleClientId, googleClientSecret]);
 
@@ -2408,12 +2408,12 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
         body: JSON.stringify({ telegramBotToken }),
       });
       if (!r.ok) throw new Error();
-    } catch { window.alert('Erro ao salvar.'); }
+    } catch { window.alert('Failed to save.'); }
     finally { setSavingTelegram(false); }
   }, [telegramBotToken]);
 
   const unlinkTelegram = useCallback(async () => {
-    if (!window.confirm('Desvincular o Telegram? A próxima pessoa a mandar mensagem pro bot vira a nova dona da conversa.')) return;
+    if (!window.confirm('Unlink Telegram? The next person to message the bot will become the new owner of the conversation.')) return;
     setUnlinkingTelegram(true);
     try {
       const r = await fetch(`${API_BASE}/api/settings`, {
@@ -2423,7 +2423,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
       });
       if (!r.ok) throw new Error();
       setTelegramOwnerId('');
-    } catch { window.alert('Erro ao desvincular.'); }
+    } catch { window.alert('Failed to unlink.'); }
     finally { setUnlinkingTelegram(false); }
   }, []);
 
@@ -2471,18 +2471,18 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
   const userPhotoUri = localUserPhoto?.uri ?? (userPhoto ? `${API_BASE}/files/${userPhoto}` : null);
 
   const NAV: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'personagens', label: 'Personagens', icon: <Users size={14} /> },
-    { id: 'sobre-mim',   label: 'Sobre mim',   icon: <User size={14} /> },
-    { id: 'memoria',     label: 'Memória',      icon: <Brain size={14} /> },
-    { id: 'provedor',    label: 'Provedor de IA', icon: <Cpu size={14} /> },
-    { id: 'voz',         label: 'Voz',            icon: <Mic size={14} /> },
+    { id: 'personagens', label: 'Characters', icon: <Users size={14} /> },
+    { id: 'sobre-mim',   label: 'About me',   icon: <User size={14} /> },
+    { id: 'memoria',     label: 'Memory',      icon: <Brain size={14} /> },
+    { id: 'provedor',    label: 'AI Provider', icon: <Cpu size={14} /> },
+    { id: 'voz',         label: 'Voice',            icon: <Mic size={14} /> },
     { id: 'skills',      label: 'Skills',       icon: <Webhook size={14} /> },
-    { id: 'rotinas',     label: 'Rotinas',      icon: <Clock size={14} /> },
-    { id: 'automacoes', label: 'Automações',   icon: <FlowIcon size={14} /> },
-    { id: 'conhecimento', label: 'Conhecimento', icon: <BookOpen size={14} /> },
+    { id: 'rotinas',     label: 'Routines',      icon: <Clock size={14} /> },
+    { id: 'automacoes', label: 'Automations',   icon: <FlowIcon size={14} /> },
+    { id: 'conhecimento', label: 'Knowledge', icon: <BookOpen size={14} /> },
     { id: 'mind',         label: 'Mind',          icon: <Network size={14} /> },
-    { id: 'aparencia',   label: 'Aparência',    icon: <Palette size={14} /> },
-    { id: 'integracoes', label: 'Integrações',  icon: <Plug size={14} /> },
+    { id: 'aparencia',   label: 'Appearance',    icon: <Palette size={14} /> },
+    { id: 'integracoes', label: 'Integrations',  icon: <Plug size={14} /> },
     { id: 'debug',       label: 'Debug',        icon: <Bug size={14} /> },
   ];
 
@@ -2526,7 +2526,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.08, duration: 0.25 }}
               >
-                <span className="text-white font-semibold text-[14px]">Configurações</span>
+                <span className="text-white font-semibold text-[14px]">Settings</span>
               </motion.div>
 
               <nav className="flex-1 px-2 flex flex-col gap-0.5">
@@ -2739,7 +2739,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'personagens' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="flex items-center justify-between px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Personagens</span>
+                    <span className="text-white font-semibold text-[14px]">Characters</span>
                     <motion.button
                       onClick={() => setEditingCharacter(null)}
                       whileHover={{ scale: 1.04 }}
@@ -2747,7 +2747,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20"
                     >
                       <Plus size={12} color="var(--accent)" />
-                      <span className="text-accent font-semibold text-[12px]">Novo</span>
+                      <span className="text-accent font-semibold text-[12px]">New</span>
                     </motion.button>
                   </div>
 
@@ -2819,7 +2819,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'sobre-mim' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Sobre mim</span>
+                    <span className="text-white font-semibold text-[14px]">About me</span>
                   </div>
 
                   <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -2842,25 +2842,25 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         </div>
                       </button>
                       <div className="flex-1 min-w-0">
-                        <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0">SEU NOME</p>
+                        <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0">YOUR NAME</p>
                         <input
                           type="text"
                           value={userName}
                           onChange={(e) => setUserName(e.target.value)}
-                          placeholder="Como a Elfie deve te chamar"
+                          placeholder="What Elfie should call you"
                           className="text-white text-[17px] font-bold bg-transparent border-none outline-none w-full placeholder:text-gray-400"
                         />
                       </div>
                     </div>
 
                     <div className="mb-6">
-                      <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">CIDADE</p>
+                      <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">CITY</p>
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
                           value={userCity}
                           onChange={(e) => setUserCity(e.target.value)}
-                          placeholder="Sua cidade"
+                          placeholder="Your city"
                           className="text-white text-[13px] bg-foreground border border-foreground rounded-xl px-3 py-2 outline-none flex-1 placeholder:text-gray-400"
                         />
                         <motion.button
@@ -2872,24 +2872,24 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                           className="flex items-center gap-1.5 px-3 py-2 rounded-xl border-none cursor-pointer bg-accent/[0.12] hover:bg-accent/20 disabled:opacity-50 transition-colors flex-shrink-0"
                         >
                           {detectingCity ? <Spinner /> : <MapPin size={13} color="var(--accent)" />}
-                          <span className="text-accent font-semibold text-[12px]">Detectar</span>
+                          <span className="text-accent font-semibold text-[12px]">Detect</span>
                         </motion.button>
                       </div>
                       <p className="text-gray-300 text-[11px] mt-1.5 m-0">
-                        Enviado em todo prompt, junto com data, horário e dia da semana.
+                        Sent with every prompt, along with the date, time, and day of the week.
                       </p>
                     </div>
 
                     <div>
-                      <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">DADOS BÁSICOS</p>
+                      <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">BASIC INFO</p>
                       <textarea
                         value={userBasicData}
                         onChange={(e) => setUserBasicData(e.target.value)}
-                        placeholder="Idade, cidade, interesses, trabalho..."
+                        placeholder="Age, city, interests, job..."
                         className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
                         style={{ minHeight: 220 }}
                       />
-                      <p className="text-gray-300 text-[11px] mt-1.5 m-0">Enviado em todo prompt.</p>
+                      <p className="text-gray-300 text-[11px] mt-1.5 m-0">Sent with every prompt.</p>
                     </div>
                   </div>
 
@@ -2901,7 +2901,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       whileTap={{ scale: 0.95 }}
                       className="h-8 px-6 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[76px] disabled:opacity-50 transition-opacity"
                     >
-                      {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+                      {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
                     </motion.button>
                   </div>
                 </div>
@@ -2910,14 +2910,14 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'memoria' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Memória de longo prazo</span>
-                    <p className="text-gray-400 text-[11px] mt-1 m-0">Fatos permanentes que a Elfie vai lembrar em toda conversa.</p>
+                    <span className="text-white font-semibold text-[14px]">Long-term memory</span>
+                    <p className="text-gray-400 text-[11px] mt-1 m-0">Permanent facts Elfie will remember in every conversation.</p>
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-5">
                     {longTermMemory.length === 0 && (
                       <div className="flex items-center justify-center py-12">
-                        <span className="text-gray-500 text-[13px]">Nenhuma memória ainda</span>
+                        <span className="text-gray-500 text-[13px]">No memories yet</span>
                       </div>
                     )}
                     <div className="flex flex-col gap-2">
@@ -2949,7 +2949,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         type="text"
                         value={newMemory}
                         onChange={(e) => setNewMemory(e.target.value)}
-                        placeholder="Adicionar memória..."
+                        placeholder="Add memory..."
                         className={smallInput}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMemory(); } }}
                       />
@@ -2972,11 +2972,11 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'provedor' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Provedor de IA</span>
+                    <span className="text-white font-semibold text-[14px]">AI Provider</span>
                   </div>
 
                   <div className="flex-1 overflow-y-auto px-6 py-5">
-                    <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-3 m-0">PROVEDOR</p>
+                    <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-3 m-0">PROVIDER</p>
                     <div className="flex gap-2 mb-6">
                       {(['openrouter', 'deepseek'] as const).map((p) => (
                         <button
@@ -3009,7 +3009,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
 
                     {llmProvider === 'deepseek' && (
                       <div className="mb-6">
-                        <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">MODELO PADRÃO</p>
+                        <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">DEFAULT MODEL</p>
                         <div className="flex gap-2">
                           {DEEPSEEK_MODELS.map((m) => (
                             <button
@@ -3026,25 +3026,25 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                           ))}
                         </div>
                         <p className="text-gray-500 text-[11px] mt-1.5 m-0">
-                          Usado quando um personagem não tem um modelo específico definido.
+                          Used when a character doesn't have a specific model set.
                         </p>
                       </div>
                     )}
 
                     <p className="text-gray-500 text-[12px] leading-5 m-0">
                       {llmProvider === 'deepseek'
-                        ? 'Embeddings continuam via OpenRouter.'
-                        : 'Acessa qualquer modelo via openrouter.ai.'}
+                        ? 'Embeddings still go through OpenRouter.'
+                        : 'Access any model via openrouter.ai.'}
                     </p>
 
                     <div className="mt-6 pt-5 border-t border-foreground flex items-center justify-between">
                       <div>
-                        <p className={`${fieldLabel} mb-0.5`}>MODO SEM LIMITE</p>
+                        <p className={`${fieldLabel} mb-0.5`}>UNLIMITED MODE</p>
                         <p className="text-gray-300 text-[11px] m-0 max-w-[320px]">
-                          O conjunto de ferramentas do dia a dia fica sempre visível pra ela, em vez de só
-                          aparecer quando ela decide que precisa. Gmail, Play Console, pixel art e afins
-                          continuam abrindo sob demanda do mesmo jeito — isso só afeta o básico. Gasta mais
-                          em toda mensagem. Ative só se custo não for problema.
+                          The everyday toolset stays always visible to her, instead of only
+                          appearing when she decides she needs it. Gmail, Play Console, pixel art, and similar
+                          tools still open on demand as usual — this only affects the basics. Costs more
+                          on every message. Only enable it if cost isn't a concern.
                         </p>
                       </div>
                       <Switch checked={unlimitedTools} onChange={() => setUnlimitedTools((v) => !v)} />
@@ -3059,7 +3059,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       whileTap={{ scale: 0.95 }}
                       className="h-8 px-6 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[76px] disabled:opacity-50 transition-opacity"
                     >
-                      {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+                      {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
                     </motion.button>
                   </div>
                 </div>
@@ -3068,7 +3068,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'voz' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Voz</span>
+                    <span className="text-white font-semibold text-[14px]">Voice</span>
                   </div>
 
                   <div className="flex-1 overflow-y-auto px-6 py-5">
@@ -3089,7 +3089,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       ))}
                     </div>
 
-                    <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-3 m-0">RECONHECIMENTO DE VOZ</p>
+                    <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-3 m-0">SPEECH RECOGNITION</p>
                     <div className="flex gap-2 mb-6">
                       {(['elevenlabs', 'fishaudio'] as const).map((p) => (
                         <button
@@ -3121,12 +3121,12 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                     )}
 
                     <p className="text-gray-500 text-[12px] leading-5 m-0">
-                      ElevenLabs usa a chave configurada no servidor (ELEVENLABS_API_KEY).
+                      ElevenLabs uses the key configured on the server (ELEVENLABS_API_KEY).
                     </p>
 
                     <div className="mt-6 pt-5 border-t border-foreground">
                       <div className="flex items-center justify-between mb-3">
-                        <p className={`${fieldLabel} mb-0`}>VOZES SALVAS</p>
+                        <p className={`${fieldLabel} mb-0`}>SAVED VOICES</p>
                         <motion.button
                           onClick={() => setEditingVoicePreset(null)}
                           whileHover={{ scale: 1.04 }}
@@ -3134,11 +3134,11 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                           className="flex items-center gap-1.5 px-3 py-1 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20"
                         >
                           <Plus size={11} color="var(--accent)" />
-                          <span className="text-accent font-semibold text-[11px]">Nova</span>
+                          <span className="text-accent font-semibold text-[11px]">New</span>
                         </motion.button>
                       </div>
                       {voicePresets.length === 0 ? (
-                        <p className="text-gray-500 text-[12px] m-0">Nenhuma voz salva ainda.</p>
+                        <p className="text-gray-500 text-[12px] m-0">No saved voices yet.</p>
                       ) : (
                         <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
                           <AnimatePresence initial={false}>
@@ -3154,8 +3154,8 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         </div>
                       )}
                       <p className="text-gray-300 text-[11px] mt-3 m-0">
-                        Dê nomes que ela consiga reconhecer — ela pode trocar de voz sozinha durante a
-                        conversa quando você pedir, tipo "fala com a voz X".
+                        Give them names she can recognize — she can switch voices on her own during the
+                        conversation when you ask, like "talk in voice X".
                       </p>
                     </div>
                   </div>
@@ -3168,7 +3168,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       whileTap={{ scale: 0.95 }}
                       className="h-8 px-6 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[76px] disabled:opacity-50 transition-opacity"
                     >
-                      {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+                      {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
                     </motion.button>
                   </div>
                 </div>
@@ -3196,7 +3196,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-foreground hover:bg-foreground/70 text-gray-300"
                             >
                               <Package size={12} color="#8a8a94" />
-                              <span className="font-semibold text-[12px]">Pacote</span>
+                              <span className="font-semibold text-[12px]">Package</span>
                             </motion.button>
                             <motion.button
                               onClick={() => setEditingSkill(null)}
@@ -3205,7 +3205,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20"
                             >
                               <Plus size={12} color="var(--accent)" />
-                              <span className="text-accent font-semibold text-[12px]">Nova</span>
+                              <span className="text-accent font-semibold text-[12px]">New</span>
                             </motion.button>
                           </div>
                         </div>
@@ -3213,13 +3213,13 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         <div className="flex-1 overflow-y-auto p-5">
                           {packages.length === 0 && ungroupedSkills.length === 0 && (
                             <div className="flex items-center justify-center py-12">
-                              <span className="text-gray-500 text-[13px]">Nenhuma skill cadastrada</span>
+                              <span className="text-gray-500 text-[13px]">No skills yet</span>
                             </div>
                           )}
 
                           {packages.length > 0 && (
                             <div className="mb-6">
-                              <p className={fieldLabel}>PACOTES</p>
+                              <p className={fieldLabel}>PACKAGES</p>
                               <div className="grid gap-2 mt-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
                                 <AnimatePresence initial={false}>
                                   {packages.map((pkg, idx) => (
@@ -3239,7 +3239,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
 
                           {ungroupedSkills.length > 0 && (
                             <div>
-                              <p className={fieldLabel}>SEM PACOTE</p>
+                              <p className={fieldLabel}>NO PACKAGE</p>
                               <div className="flex flex-col gap-2 mt-2">
                                 <AnimatePresence initial={false}>
                                   {ungroupedSkills.map((s, idx) => (
@@ -3291,7 +3291,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20 flex-shrink-0"
                           >
                             <Plus size={12} color="var(--accent)" />
-                            <span className="text-accent font-semibold text-[12px]">Nova</span>
+                            <span className="text-accent font-semibold text-[12px]">New</span>
                           </motion.button>
                         </div>
 
@@ -3302,7 +3302,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         <div className="flex-1 overflow-y-auto p-5">
                           {packageSkills.length === 0 && (
                             <div className="flex items-center justify-center py-12">
-                              <span className="text-gray-500 text-[13px]">Nenhuma skill neste pacote</span>
+                              <span className="text-gray-500 text-[13px]">No skills in this package</span>
                             </div>
                           )}
                           <div className="flex flex-col gap-2">
@@ -3328,7 +3328,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'rotinas' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="flex items-center justify-between px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Rotinas</span>
+                    <span className="text-white font-semibold text-[14px]">Routines</span>
                     <motion.button
                       onClick={() => setEditingRoutine(null)}
                       whileHover={{ scale: 1.04 }}
@@ -3336,14 +3336,14 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20"
                     >
                       <Plus size={12} color="var(--accent)" />
-                      <span className="text-accent font-semibold text-[12px]">Nova</span>
+                      <span className="text-accent font-semibold text-[12px]">New</span>
                     </motion.button>
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-5">
                     {routines.length === 0 && (
                       <div className="flex items-center justify-center py-12">
-                        <span className="text-gray-500 text-[13px]">Nenhuma rotina cadastrada</span>
+                        <span className="text-gray-500 text-[13px]">No routines yet</span>
                       </div>
                     )}
                     <div className="flex flex-col gap-2">
@@ -3366,7 +3366,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'automacoes' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="flex items-center justify-between px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Automações</span>
+                    <span className="text-white font-semibold text-[14px]">Automations</span>
                     <motion.button
                       onClick={createAndOpenWorkflow}
                       disabled={creatingWorkflow}
@@ -3375,14 +3375,14 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20 disabled:opacity-50"
                     >
                       {creatingWorkflow ? <Spinner /> : <Plus size={12} color="var(--accent)" />}
-                      <span className="text-accent font-semibold text-[12px]">Nova</span>
+                      <span className="text-accent font-semibold text-[12px]">New</span>
                     </motion.button>
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-5">
                     {workflows.length === 0 && (
                       <div className="flex items-center justify-center py-12">
-                        <span className="text-gray-500 text-[13px]">Nenhuma automação cadastrada</span>
+                        <span className="text-gray-500 text-[13px]">No automations yet</span>
                       </div>
                     )}
                     <div className="flex flex-col gap-2">
@@ -3415,7 +3415,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         className="flex flex-col h-full overflow-hidden"
                       >
                         <div className="flex items-center justify-between px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                          <span className="text-white font-semibold text-[14px]">Conhecimento</span>
+                          <span className="text-white font-semibold text-[14px]">Knowledge</span>
                           <div className="flex items-center gap-1.5">
                             <motion.button
                               onClick={runKnowledgeReindex}
@@ -3425,7 +3425,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-foreground hover:bg-foreground/70 text-gray-300 disabled:opacity-50"
                             >
                               {reindexing ? <Spinner /> : <RefreshCw size={12} color="#8a8a94" />}
-                              <span className="font-semibold text-[12px]">Reindexar</span>
+                              <span className="font-semibold text-[12px]">Reindex</span>
                             </motion.button>
                             <motion.button
                               onClick={() => setEditingFolder(null)}
@@ -3434,7 +3434,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20"
                             >
                               <Plus size={12} color="var(--accent)" />
-                              <span className="text-accent font-semibold text-[12px]">Nova pasta</span>
+                              <span className="text-accent font-semibold text-[12px]">New folder</span>
                             </motion.button>
                           </div>
                         </div>
@@ -3446,7 +3446,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                               type="text"
                               value={knowledgeQuery}
                               onChange={(e) => handleKnowledgeQueryChange(e.target.value)}
-                              placeholder="Buscar na base de conhecimento..."
+                              placeholder="Search the knowledge base..."
                               className="w-full text-white text-[13px] bg-foreground border border-foreground rounded-full pl-9 pr-4 py-2.5 outline-none placeholder:text-gray-400"
                             />
                           </div>
@@ -3461,7 +3461,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                               )}
                               {!knowledgeSearching && knowledgeSearchResults.length === 0 && (
                                 <div className="flex items-center justify-center py-12">
-                                  <span className="text-gray-500 text-[13px]">Nada encontrado.</span>
+                                  <span className="text-gray-500 text-[13px]">Nothing found.</span>
                                 </div>
                               )}
                               <div className="flex flex-col gap-2">
@@ -3481,7 +3481,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                             <>
                               {knowledgeFolders.length === 0 && (
                                 <div className="flex items-center justify-center py-12">
-                                  <span className="text-gray-500 text-[13px]">Nenhuma pasta de conhecimento cadastrada</span>
+                                  <span className="text-gray-500 text-[13px]">No knowledge folders yet</span>
                                 </div>
                               )}
                               <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
@@ -3535,7 +3535,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20 flex-shrink-0"
                           >
                             <Plus size={12} color="var(--accent)" />
-                            <span className="text-accent font-semibold text-[12px]">Novo arquivo</span>
+                            <span className="text-accent font-semibold text-[12px]">New file</span>
                           </motion.button>
                         </div>
 
@@ -3546,7 +3546,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         <div className="flex-1 overflow-y-auto p-5">
                           {(selectedFolder?.files.length ?? 0) === 0 && (
                             <div className="flex items-center justify-center py-12">
-                              <span className="text-gray-500 text-[13px]">Nenhum arquivo nesta pasta</span>
+                              <span className="text-gray-500 text-[13px]">No files in this folder</span>
                             </div>
                           )}
                           <div className="flex flex-col gap-2">
@@ -3585,7 +3585,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       onOpenKnowledgeFolder={(f) => setEditingFolder(f)}
                       onOpenKnowledgeFile={(f, file) => setEditingFile({ folder: f.name, file })}
                       onOpenIntegration={() => setTab('integracoes')}
-                      emptyMessage="Nada cadastrado ainda — crie uma skill ou uma pasta de conhecimento"
+                      emptyMessage="Nothing here yet — create a skill or a knowledge folder"
                     />
                   </div>
                 </div>
@@ -3594,10 +3594,10 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'aparencia' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Aparência</span>
+                    <span className="text-white font-semibold text-[14px]">Appearance</span>
                   </div>
                   <div className="flex-1 overflow-y-auto p-6">
-                    <p className={fieldLabel}>COR DE DESTAQUE</p>
+                    <p className={fieldLabel}>ACCENT COLOR</p>
                     <div className="flex items-center gap-3 mt-2">
                       <label
                         className="relative rounded-full flex-shrink-0 cursor-pointer overflow-hidden"
@@ -3625,7 +3625,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       />
                     </div>
                     <p className="text-gray-500 text-[11px] mt-2 m-0">
-                      Usada em botões, links e destaques pelo app inteiro. Muda na hora. Digite um hex (#RRGGBB) ou escolha na roda de cores.
+                      Used for buttons, links, and highlights across the whole app. Changes instantly. Type a hex value (#RRGGBB) or pick from the color wheel.
                     </p>
 
                     <div className="flex items-center gap-2 mt-4 flex-wrap">
@@ -3653,7 +3653,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
               {tab === 'integracoes' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
-                    <span className="text-white font-semibold text-[14px]">Integrações</span>
+                    <span className="text-white font-semibold text-[14px]">Integrations</span>
                   </div>
                   <div className="flex-1 overflow-y-auto p-5">
                     <div className="rounded-2xl bg-foreground p-4 mb-4">
@@ -3661,7 +3661,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         onClick={() => setGoogleConfigOpen((v) => !v)}
                         className="flex items-center justify-between w-full bg-transparent border-none cursor-pointer p-0"
                       >
-                        <span className="text-white text-[13px] font-semibold">Configurar acesso ao Google</span>
+                        <span className="text-white text-[13px] font-semibold">Configure Google access</span>
                         <motion.div animate={{ rotate: googleConfigOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
                           <ChevronDown size={16} className="text-gray-400" />
                         </motion.div>
@@ -3680,11 +3680,11 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                             <div className="pt-3">
                               <ol className="flex flex-col gap-2.5 m-0 p-0" style={{ listStyle: 'none' }}>
                                 {[
-                                  <>Abra o <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-accent inline-flex items-center gap-0.5">console.cloud.google.com<ExternalLink size={10} /></a> e crie (ou selecione) um projeto.</>,
-                                  <>Em <b className="text-white">APIs e Serviços → Biblioteca</b>, ative a Gmail API, a Google Calendar API e a Google Drive API.</>,
-                                  <>Em <b className="text-white">Tela de consentimento OAuth</b>, tipo Externo, adicione os escopos do Gmail, Calendar e Drive, e coloque sua própria conta Google como <b className="text-white">Test user</b>.</>,
-                                  <>Em <b className="text-white">Credenciais → Criar credenciais → ID do cliente OAuth</b>, tipo <b className="text-white">Aplicativo da Web</b>, cole o Redirect URI abaixo exatamente como está.</>,
-                                  <>Copie o Client ID e o Client Secret gerados e cole nos campos abaixo.</>,
+                                  <>Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-accent inline-flex items-center gap-0.5">console.cloud.google.com<ExternalLink size={10} /></a> and create (or select) a project.</>,
+                                  <>In <b className="text-white">APIs &amp; Services → Library</b>, enable the Gmail API, Google Calendar API, and Google Drive API.</>,
+                                  <>In <b className="text-white">OAuth consent screen</b>, choose External, add the Gmail, Calendar, and Drive scopes, and add your own Google account as a <b className="text-white">Test user</b>.</>,
+                                  <>In <b className="text-white">Credentials → Create credentials → OAuth client ID</b>, choose <b className="text-white">Web application</b>, and paste the Redirect URI below exactly as shown.</>,
+                                  <>Copy the generated Client ID and Client Secret and paste them into the fields below.</>,
                                 ].map((text, i) => (
                                   <li key={i} className="flex items-start gap-2.5">
                                     <span
@@ -3743,7 +3743,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                                   whileTap={{ scale: 0.95 }}
                                   className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[76px] disabled:opacity-50 transition-opacity"
                                 >
-                                  {savingGoogle ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+                                  {savingGoogle ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
                                 </motion.button>
                               </div>
                             </div>
@@ -3769,7 +3769,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                             className="relative flex flex-col items-center gap-2 px-3 py-4 rounded-2xl bg-foreground"
                           >
                             {connected && (
-                              <div className="absolute top-2.5 right-2.5" title={integration?.googleEmail ?? 'Conectado'}>
+                              <div className="absolute top-2.5 right-2.5" title={integration?.googleEmail ?? 'Connected'}>
                                 <CheckCircle2 size={14} className="text-green-300" />
                               </div>
                             )}
@@ -3783,7 +3783,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                             {connected ? (
                               <motion.button
                                 onClick={() => disconnectIntegration(service)}
-                                title="Desconectar"
+                                title="Disconnect"
                                 whileHover={{ scale: 1.08 }}
                                 whileTap={{ scale: 0.92 }}
                                 className="mt-1 w-7 h-7 flex items-center justify-center rounded-full border-none cursor-pointer bg-destructive/[0.12] hover:bg-destructive/20 text-destructive transition-colors"
@@ -3794,7 +3794,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                               <motion.button
                                 onClick={() => connectGoogleService(service)}
                                 disabled={!googleConfigured}
-                                title={googleConfigured ? 'Conectar' : 'Preencha o Client ID e Client Secret acima primeiro'}
+                                title={googleConfigured ? 'Connect' : 'Fill in the Client ID and Client Secret above first'}
                                 whileHover={googleConfigured ? { scale: 1.08 } : undefined}
                                 whileTap={googleConfigured ? { scale: 0.92 } : undefined}
                                 className="mt-1 w-7 h-7 flex items-center justify-center rounded-full border-none cursor-pointer bg-accent/[0.12] hover:bg-accent/20 text-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -3808,7 +3808,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                     </div>
 
                     <p className="text-gray-400 text-[10px] mt-3 m-0">
-                      Conectar só funciona no navegador da máquina onde a API roda.
+                      Connecting only works in the browser on the machine running the API.
                     </p>
 
                     <div className="rounded-2xl bg-foreground p-4 mt-4">
@@ -3817,18 +3817,18 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                         <span className="text-white text-[13px] font-semibold flex-1">Telegram</span>
                         {telegramOwnerId && (
                           <span className="flex items-center gap-1 text-[10px] font-bold text-green-300">
-                            <CheckCircle2 size={12} /> vinculado
+                            <CheckCircle2 size={12} /> linked
                           </span>
                         )}
                       </div>
                       <p className="text-gray-300 text-[11px] leading-4 mt-0 mb-3">
-                        Canal completo de conversa com a Elfie pelo Telegram — texto, imagens, tudo que o chat faz.
-                        Crie um bot com o{' '}
+                        A full channel to chat with Elfie via Telegram — text, images, everything the chat does.
+                        Create a bot with{' '}
                         <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-accent inline-flex items-center gap-0.5">
                           @BotFather<ExternalLink size={10} />
                         </a>{' '}
-                        e cole o token abaixo. A primeira pessoa a mandar mensagem pro bot vira a dona da conversa —
-                        mantenha o token e o nome de usuário do bot em segredo.
+                        and paste the token below. The first person to message the bot becomes the owner of the conversation —
+                        keep the token and the bot's username secret.
                       </p>
                       <div className="flex gap-2">
                         <input
@@ -3847,13 +3847,13 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                           whileTap={{ scale: 0.95 }}
                           className="h-[42px] px-5 rounded-xl bg-accent border-none cursor-pointer flex items-center justify-center min-w-[76px] disabled:opacity-50 transition-opacity flex-shrink-0"
                         >
-                          {savingTelegram ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+                          {savingTelegram ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
                         </motion.button>
                       </div>
                       {telegramOwnerId && (
                         <div className="flex items-center justify-between mt-3">
                           <span className="text-gray-400 text-[11px]">
-                            Vinculado ao usuário Telegram <span className="font-mono text-gray-300">{telegramOwnerId}</span>
+                            Linked to Telegram user <span className="font-mono text-gray-300">{telegramOwnerId}</span>
                           </span>
                           <motion.button
                             onClick={unlinkTelegram}
@@ -3863,7 +3863,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-none cursor-pointer bg-destructive/[0.12] hover:bg-destructive/20 disabled:opacity-50 transition-colors flex-shrink-0"
                           >
                             {unlinkingTelegram ? <Spinner /> : <Unlink size={11} color="#ff382b" />}
-                            <span className="text-destructive font-semibold text-[11px]">Desvincular</span>
+                            <span className="text-destructive font-semibold text-[11px]">Unlink</span>
                           </motion.button>
                         </div>
                       )}
@@ -3883,7 +3883,7 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
                       className="flex items-center gap-3 px-5 py-3 rounded-full border border-foreground bg-transparent cursor-pointer transition-colors hover:bg-foreground"
                     >
                       <Bug size={16} color="#555" />
-                      <span className="text-gray-300 text-[13px]">Abrir painel de debug</span>
+                      <span className="text-gray-300 text-[13px]">Open debug panel</span>
                       {errorCount > 0 && (
                         <span
                           className="rounded-full px-2 text-white text-[10px] font-bold bg-destructive"

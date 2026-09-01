@@ -262,48 +262,48 @@ function formatToolLabel(tool: string): string {
 }
 
 const TOOL_ACTIVITY_LABELS: Record<string, string> = {
-  web_search: "pesquisando na web...",
-  web_fetch: "lendo a página...",
-  see_image: "olhando a imagem...",
-  browse_screenshot: "tirando print do site...",
-  search_products: "buscando produtos...",
-  save_memory: "salvando memória...",
-  execute_command: "executando comando...",
-  generate_pixel_art: "gerando pixel art...",
-  generate_pixel_art_pro: "gerando pixel art (pro)...",
-  convert_to_pixel_art: "convertendo...",
-  convert_to_pixel_art_pro: "convertendo...",
-  remove_background: "removendo fundo...",
-  generate_with_style: "gerando com estilo...",
-  generate_image: "gerando imagem...",
-  edit_image: "editando imagem...",
-  send_gif: "procurando gif...",
-  send_voice_message: "gravando áudio...",
-  send_image: "buscando imagem...",
-  create_skill: "criando nova ferramenta...",
-  edit_skill: "editando ferramenta...",
-  delete_skill: "apagando ferramenta...",
+  web_search: "searching the web...",
+  web_fetch: "reading the page...",
+  see_image: "looking at the image...",
+  browse_screenshot: "taking a screenshot of the site...",
+  search_products: "searching for products...",
+  save_memory: "saving memory...",
+  execute_command: "running command...",
+  generate_pixel_art: "generating pixel art...",
+  generate_pixel_art_pro: "generating pixel art (pro)...",
+  convert_to_pixel_art: "converting...",
+  convert_to_pixel_art_pro: "converting...",
+  remove_background: "removing background...",
+  generate_with_style: "generating with style...",
+  generate_image: "generating image...",
+  edit_image: "editing image...",
+  send_gif: "looking for a gif...",
+  send_voice_message: "recording audio...",
+  send_image: "finding image...",
+  create_skill: "creating new tool...",
+  edit_skill: "editing tool...",
+  delete_skill: "deleting tool...",
 };
 
 const TOOL_ERROR_LABELS: Record<string, string> = {
-  web_search: "pesquisa falhou",
-  web_fetch: "página não abriu",
-  see_image: "não consegui ver",
-  browse_screenshot: "print falhou",
-  search_products: "busca falhou",
-  execute_command: "comando falhou",
-  generate_pixel_art: "geração falhou",
-  generate_pixel_art_pro: "geração falhou",
-  convert_to_pixel_art: "conversão falhou",
-  convert_to_pixel_art_pro: "conversão falhou",
-  remove_background: "remoção falhou",
-  generate_with_style: "geração falhou",
-  generate_image: "geração falhou",
-  edit_image: "edição falhou",
-  create_skill: "falha ao criar ferramenta",
-  edit_skill: "falha ao editar ferramenta",
-  delete_skill: "falha ao apagar ferramenta",
-  erro: "algo deu errado",
+  web_search: "search failed",
+  web_fetch: "page wouldn't open",
+  see_image: "couldn't see it",
+  browse_screenshot: "screenshot failed",
+  search_products: "search failed",
+  execute_command: "command failed",
+  generate_pixel_art: "generation failed",
+  generate_pixel_art_pro: "generation failed",
+  convert_to_pixel_art: "conversion failed",
+  convert_to_pixel_art_pro: "conversion failed",
+  remove_background: "removal failed",
+  generate_with_style: "generation failed",
+  generate_image: "generation failed",
+  edit_image: "edit failed",
+  create_skill: "failed to create tool",
+  edit_skill: "failed to edit tool",
+  delete_skill: "failed to delete tool",
+  erro: "something went wrong",
 };
 
 const TOOL_ACTIVITY_ICONS: Record<string, LucideIcon> = {
@@ -401,7 +401,7 @@ const SearchSources = memo(({ sources }: { sources: SearchSource[] }) => {
       >
         <Globe size={9} color="#d1d5db" />
         <span className="text-gray-300 font-black" style={{ fontSize: 10 }}>
-          {sources.length} {sources.length === 1 ? "fonte" : "fontes"}
+          {sources.length} {sources.length === 1 ? "source" : "sources"}
         </span>
       </motion.button>
 
@@ -427,7 +427,7 @@ const SearchSources = memo(({ sources }: { sources: SearchSource[] }) => {
                 <div className="flex items-center gap-2">
                   <Globe size={14} color="var(--accent)" />
                   <span className="text-[15px] text-white font-semibold">
-                    {sources.length} {sources.length === 1 ? "fonte" : "fontes"}
+                    {sources.length} {sources.length === 1 ? "source" : "sources"}
                   </span>
                 </div>
                 <motion.button
@@ -970,7 +970,7 @@ const ImageFullscreenModal = memo(
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
               className="absolute top-4 left-4 z-10 p-2 bg-black/50 rounded-full border-none cursor-pointer"
-              title="Baixar imagem"
+              title="Download image"
             >
               <Download size={22} color="#fff" />
             </motion.button>
@@ -1101,7 +1101,7 @@ const ReplyPreview = memo(
               <Reply size={13} color="var(--accent)" className="flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <span className="text-[10px] text-gray-400 font-semibold block">
-                  Respondendo a {replyingTo.sender === "user" ? "você" : aiName}
+                  Replying to {replyingTo.sender === "user" ? "you" : aiName}
                 </span>
                 <span
                   className="mt-0.5 text-[12px] text-gray-300 block overflow-hidden whitespace-nowrap"
@@ -1155,9 +1155,9 @@ const DeleteMessageModal = memo(
             transition={{ type: "spring", stiffness: 400, damping: 32 }}
             className="w-4/5 max-w-sm flex flex-col rounded-2xl bg-foreground p-5"
           >
-            <span className="mb-2 text-[15px] text-white font-semibold">Apagar mensagem</span>
+            <span className="mb-2 text-[15px] text-white font-semibold">Delete message</span>
             <span className="mb-5 text-[13px] text-gray-300 leading-5">
-              Tem certeza que deseja apagar esta mensagem?
+              Are you sure you want to delete this message?
             </span>
             <div className="w-full flex gap-2">
               <motion.button
@@ -1166,7 +1166,7 @@ const DeleteMessageModal = memo(
                 whileTap={{ scale: 0.96 }}
                 className="flex-1 rounded-full bg-background px-4 py-2.5 border-none cursor-pointer"
               >
-                <span className="text-[13px] text-gray-300 font-semibold">Cancelar</span>
+                <span className="text-[13px] text-gray-300 font-semibold">Cancel</span>
               </motion.button>
               <motion.button
                 onClick={onConfirm}
@@ -1174,7 +1174,7 @@ const DeleteMessageModal = memo(
                 whileTap={{ scale: 0.96 }}
                 className="flex-1 rounded-full bg-destructive px-4 py-2.5 border-none cursor-pointer"
               >
-                <span className="text-[13px] text-white font-semibold">Apagar</span>
+                <span className="text-[13px] text-white font-semibold">Delete</span>
               </motion.button>
             </div>
           </motion.div>
@@ -1216,11 +1216,11 @@ const EditMessageModal = memo(
             transition={{ type: "spring", stiffness: 400, damping: 32 }}
             className="w-4/5 max-w-sm flex flex-col rounded-2xl bg-foreground p-5"
           >
-            <span className="mb-3 text-[15px] text-white font-semibold">Editar mensagem</span>
+            <span className="mb-3 text-[15px] text-white font-semibold">Edit message</span>
             <textarea
               value={value}
               onChange={(e) => onChange(e.target.value)}
-              placeholder="Digite sua mensagem..."
+              placeholder="Type your message..."
               className="mb-5 w-full rounded-xl bg-background px-4 py-3 text-white text-[13px] border border-foreground outline-none resize-none min-h-[80px] placeholder:text-gray-400"
               maxLength={2000}
               autoFocus
@@ -1232,7 +1232,7 @@ const EditMessageModal = memo(
                 whileTap={{ scale: 0.96 }}
                 className="flex-1 rounded-full bg-background px-4 py-2.5 border-none cursor-pointer"
               >
-                <span className="text-[13px] text-gray-300 font-semibold">Cancelar</span>
+                <span className="text-[13px] text-gray-300 font-semibold">Cancel</span>
               </motion.button>
               <motion.button
                 onClick={onConfirm}
@@ -1241,7 +1241,7 @@ const EditMessageModal = memo(
                 whileTap={{ scale: 0.96 }}
                 className={`flex-1 rounded-full px-4 py-2.5 border-none cursor-pointer disabled:opacity-50 ${value.trim() ? "bg-accent" : "bg-background"}`}
               >
-                <span className="text-[13px] text-white font-semibold">Salvar</span>
+                <span className="text-[13px] text-white font-semibold">Save</span>
               </motion.button>
             </div>
           </motion.div>
@@ -1294,14 +1294,14 @@ const NeuroMessage = memo(
                 className="rounded-full px-4 py-1.5 text-white font-bold border-none cursor-pointer"
                 style={{ background: "var(--accent)", fontSize: 13 }}
               >
-                sim
+                yes
               </button>
               <button
                 onClick={() => onConfirm(item.neuroTaskId!, false)}
                 className="bg-foreground rounded-full px-4 py-1.5 text-gray-300 font-bold border-none cursor-pointer"
                 style={{ fontSize: 13 }}
               >
-                não
+                no
               </button>
             </div>
           )}
@@ -1337,7 +1337,7 @@ const SkillConfirmationMessage = memo(
             <div className="flex flex-row items-center gap-1.5 mb-1.5">
               <AlertTriangle size={11} color="var(--accent)" />
               <span style={{ fontSize: 10, color: "var(--accent)", fontWeight: 900 }}>
-                CONFIRMAÇÃO NECESSÁRIA
+                CONFIRMATION NEEDED
               </span>
             </div>
             <p className="text-white font-semibold m-0" style={{ fontSize: 14 }}>
@@ -1367,14 +1367,14 @@ const SkillConfirmationMessage = memo(
                   className="rounded-full px-4 py-1.5 text-white font-bold border-none cursor-pointer"
                   style={{ background: "var(--accent)", fontSize: 13 }}
                 >
-                  Aprovar
+                  Approve
                 </button>
                 <button
                   onClick={() => onResolve(conf.confirmationId, "reject")}
                   className="bg-foreground rounded-full px-4 py-1.5 text-gray-300 font-bold border-none cursor-pointer"
                   style={{ fontSize: 13 }}
                 >
-                  Não aprovar
+                  Don't approve
                 </button>
               </div>
               <div className="flex flex-row gap-2">
@@ -1382,7 +1382,7 @@ const SkillConfirmationMessage = memo(
                   type="text"
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="Explique o que mudar (opcional)..."
+                  placeholder="Explain what to change (optional)..."
                   className="flex-1 rounded-full bg-background px-3.5 py-2 text-white border border-foreground outline-none placeholder:text-gray-400"
                   style={{ fontSize: 12 }}
                 />
@@ -1392,16 +1392,16 @@ const SkillConfirmationMessage = memo(
                   className="rounded-full px-4 py-2 text-white font-bold border-none cursor-pointer disabled:opacity-40"
                   style={{ background: "#3a3a46", fontSize: 12 }}
                 >
-                  Enviar
+                  Send
                 </button>
               </div>
             </div>
           ) : (
             <div className="mt-1.5 ml-1" style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700 }}>
-              {decision === "approved" && "✓ aprovado"}
+              {decision === "approved" && "✓ approved"}
               {decision === "rejected" &&
-                (conf.feedback ? `✕ alterações pedidas: "${conf.feedback}"` : "✕ não aprovado")}
-              {decision === "timeout" && "⏱ tempo esgotado sem resposta"}
+                (conf.feedback ? `✕ changes requested: "${conf.feedback}"` : "✕ not approved")}
+              {decision === "timeout" && "⏱ timed out with no response"}
             </div>
           )}
         </div>
@@ -1455,7 +1455,7 @@ const MessageItem = memo(
               <Reply size={11} color="var(--accent)" className="flex-shrink-0" />
               <div className="min-w-0">
                 <span className="text-[10px] text-gray-400 font-semibold block">
-                  {item.replyTo.sender === "user" ? "Você" : aiName}
+                  {item.replyTo.sender === "user" ? "You" : aiName}
                 </span>
                 <span
                   className="text-[12px] text-gray-300 block overflow-hidden whitespace-nowrap"
@@ -1469,7 +1469,7 @@ const MessageItem = memo(
           {isOwn && item.isRoutine && (
             <div className="flex flex-row items-center gap-1.5 mr-2 mb-1 self-end">
               <Clock size={9} color="#d1d5db" />
-              <span className="text-[10px] text-gray-300">rotina agendada</span>
+              <span className="text-[10px] text-gray-300">scheduled routine</span>
             </div>
           )}
           {item.toolErrors && item.toolErrors.length > 0 && (
@@ -1667,7 +1667,7 @@ const MessageItem = memo(
                 </span>
                 <div className="flex items-center gap-1.5">
                   {item.isEdited && (
-                    <span className="text-[8px] text-gray-300">editado</span>
+                    <span className="text-[8px] text-gray-300">edited</span>
                   )}
                   {item.fromNeuro && (
                     <span
@@ -1714,11 +1714,11 @@ const MessageItem = memo(
                     ),
                   },
                   save_memory: {
-                    label: "memória salva",
+                    label: "memory saved",
                     icon: <Pen size={8} color="#d1d5db" />,
                   },
                   generate_pixel_art: {
-                    label: "pixel art gerada",
+                    label: "pixel art generated",
                     icon: (
                       <PixelGridIcon
                         size={10}
@@ -1758,7 +1758,7 @@ const MessageItem = memo(
                     ),
                   },
                   generate_with_style: {
-                    label: "gerado com estilo",
+                    label: "generated with style",
                     icon: (
                       <PixelGridIcon
                         size={10}
@@ -1768,7 +1768,7 @@ const MessageItem = memo(
                     ),
                   },
                   remove_background: {
-                    label: "fundo removido",
+                    label: "background removed",
                     icon: (
                       <PixelGridIcon
                         size={10}
@@ -1778,11 +1778,11 @@ const MessageItem = memo(
                     ),
                   },
                   web_search: {
-                    label: "pesquisa web",
+                    label: "web search",
                     icon: <Globe size={8} color="#d1d5db" />,
                   },
                   search_products: {
-                    label: "busca produtos",
+                    label: "product search",
                     icon: <Globe size={8} color="#d1d5db" />,
                   },
                   send_gif: {
@@ -1790,19 +1790,19 @@ const MessageItem = memo(
                     icon: <span style={{ fontSize: 9 }}>GIF</span>,
                   },
                   send_voice_message: {
-                    label: "áudio",
+                    label: "audio",
                     icon: <Mic size={8} color="#d1d5db" />,
                   },
                   create_skill: {
-                    label: "nova ferramenta",
+                    label: "new tool",
                     icon: <Wrench size={8} color="#d1d5db" />,
                   },
                   edit_skill: {
-                    label: "ferramenta editada",
+                    label: "tool edited",
                     icon: <Pencil size={8} color="#d1d5db" />,
                   },
                   delete_skill: {
-                    label: "ferramenta removida",
+                    label: "tool removed",
                     icon: <Trash2 size={8} color="#d1d5db" />,
                   },
                 };
@@ -1836,7 +1836,7 @@ const MessageItem = memo(
           >
             <button
               onClick={() => onReply(item)}
-              title="Responder"
+              title="Reply"
               className="p-1.5 rounded-full bg-transparent hover:bg-foreground border-none cursor-pointer"
             >
               <Reply size={12} color="#9ca3af" />
@@ -1845,14 +1845,14 @@ const MessageItem = memo(
               <>
                 <button
                   onClick={() => onEdit(item)}
-                  title="Editar"
+                  title="Edit"
                   className="p-1.5 rounded-full bg-transparent hover:bg-foreground border-none cursor-pointer"
                 >
                   <Pencil size={12} color="#9ca3af" />
                 </button>
                 <button
                   onClick={() => onDelete(item)}
-                  title="Apagar"
+                  title="Delete"
                   className="p-1.5 rounded-full bg-transparent hover:bg-foreground border-none cursor-pointer"
                 >
                   <Trash2 size={12} color="#9ca3af" />
@@ -1935,7 +1935,7 @@ const ChatsDrawer = memo(
         </div>
 
         <p className="text-gray-500 font-semibold text-[10px] tracking-widest px-4 pt-3 pb-2 m-0">
-          RECENTES
+          RECENT
         </p>
 
         <div className="flex-1 overflow-y-auto px-2">
@@ -2006,7 +2006,7 @@ const ChatsDrawer = memo(
             className="flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl bg-transparent border-none cursor-pointer hover:bg-foreground transition-colors"
           >
             <Settings size={14} color="#8a8a94" />
-            <span className="text-gray-400 text-[12px]">Configurações</span>
+            <span className="text-gray-400 text-[12px]">Settings</span>
           </motion.button>
         </div>
       </div>
@@ -2116,7 +2116,7 @@ export default function ChatScreen() {
       key: newId(),
       kind: "tool",
       toolName,
-      label: TOOL_ACTIVITY_LABELS[toolName] ?? "processando...",
+      label: TOOL_ACTIVITY_LABELS[toolName] ?? "processing...",
       detail,
     });
   }, []);
@@ -2128,7 +2128,7 @@ export default function ChatScreen() {
       key,
       kind: "error",
       toolName,
-      label: TOOL_ERROR_LABELS[toolName] ?? "algo deu errado",
+      label: TOOL_ERROR_LABELS[toolName] ?? "something went wrong",
       detail: message,
     });
     activityErrorTimerRef.current = window.setTimeout(() => {
@@ -2392,7 +2392,7 @@ export default function ChatScreen() {
       if (!filename) return;
       setAvatarModal({
         uri: `${API_BASE}/files/${filename}`,
-        name: kind === "ai" ? aiName : "Você",
+        name: kind === "ai" ? aiName : "You",
       });
     },
     [aiPhoto, userPhoto, aiName],
@@ -2428,7 +2428,7 @@ export default function ChatScreen() {
           try {
             const ev = JSON.parse(line.slice(6));
             if (ev.type === "neuro_tool") {
-              setNeuroActivity(ev.label ?? ev.tool ?? "usando ferramenta...");
+              setNeuroActivity(ev.label ?? ev.tool ?? "using tool...");
             }
             if (ev.type === "neuro_update" && ev.text) {
               setNeuroActivity(ev.text);
@@ -2871,7 +2871,7 @@ export default function ChatScreen() {
                 });
               }
               if (event.type === "tool_error") {
-                showToolError(event.tool ?? "erro", event.message ?? "algo deu errado");
+                showToolError(event.tool ?? "erro", event.message ?? "something went wrong");
                 const toolError = { tool: event.tool, message: event.message };
                 setMessages((prev) => {
                   const hasMsg = prev.some((m) => m.id === currentMsgId);
@@ -2919,8 +2919,8 @@ export default function ChatScreen() {
               }
               if (event.type === "error") {
                 setIsAiTyping(false);
-                showToolError("erro", event.message ?? "Erro desconhecido");
-                const errEntry = { tool: "erro", message: event.message ?? "Erro desconhecido" };
+                showToolError("erro", event.message ?? "Unknown error");
+                const errEntry = { tool: "erro", message: event.message ?? "Unknown error" };
                 setMessages((prev) => {
                   const hasMsg = prev.some((m) => m.id === currentMsgId);
                   if (hasMsg)
@@ -3001,7 +3001,7 @@ export default function ChatScreen() {
           setMessages((prev) => [
             {
               id: currentMsgId,
-              content: "Erro ao conectar. Tente novamente.",
+              content: "Connection error. Please try again.",
               sender: "ai",
               createdAt: new Date().toISOString(),
             },
@@ -3332,10 +3332,10 @@ export default function ChatScreen() {
             </div>
             <div className="text-center">
               <p className="text-white font-semibold" style={{ fontSize: 15 }}>
-                Solte para adicionar
+                Drop to add
               </p>
               <p className="text-gray-500 mt-1" style={{ fontSize: 12 }}>
-                à conversa aberta
+                to the open conversation
               </p>
             </div>
           </div>
@@ -3411,7 +3411,7 @@ export default function ChatScreen() {
               onClick={() => setShowCall(true)}
               className="w-8 h-8 rounded-full flex items-center justify-center border-none cursor-pointer hover:bg-foreground transition-colors"
               style={{ background: "transparent" }}
-              title="Ligar"
+              title="Call"
             >
               <Phone size={16} color="#fff" />
             </button>
@@ -3439,7 +3439,7 @@ export default function ChatScreen() {
                       <div key={item.id} className="flex items-center justify-center my-2">
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full" style={{ backgroundColor: "#1a1a24" }}>
                           <X size={9} color="#6b7280" />
-                          <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>resposta cancelada</span>
+                          <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 600 }}>response cancelled</span>
                         </div>
                       </div>
                     );
@@ -3519,7 +3519,7 @@ export default function ChatScreen() {
                 <span
                   style={{ fontSize: 11, color: "#9ca3af", fontWeight: 700 }}
                 >
-                  {neuroActivity ?? "Neuro executando"}
+                  {neuroActivity ?? "Neuro running"}
                 </span>
                 {activeNeuroChatId && (
                   <button
@@ -3535,9 +3535,9 @@ export default function ChatScreen() {
                     }}
                     className="border-none bg-transparent cursor-pointer p-0 ml-1"
                     style={{ fontSize: 10, color: "#f87171", fontWeight: 700 }}
-                    title="Parar Neuro"
+                    title="Stop Neuro"
                   >
-                    parar
+                    stop
                   </button>
                 )}
               </div>
@@ -3566,7 +3566,7 @@ export default function ChatScreen() {
                 value={message}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Mensagem..."
+                placeholder="Message..."
                 className="w-full text-white border-none outline-none resize-none text-[14px] leading-[1.4] bg-transparent block"
                 style={{
                   minHeight: 80,
@@ -3582,7 +3582,7 @@ export default function ChatScreen() {
                     onClick={() => fileInputRef.current?.click()}
                     whileHover={{ scale: 1.1 }}
                     whileTap={{ scale: 0.9 }}
-                    title="Anexar imagem"
+                    title="Attach image"
                     className="p-2 rounded-full border-none bg-transparent cursor-pointer hover:bg-white/5 transition-colors"
                   >
                     <Plus size={15} color="#6b7280" />
@@ -3593,7 +3593,7 @@ export default function ChatScreen() {
                       onClick={() => setShowExtrasMenu((v) => !v)}
                       whileHover={{ scale: 1.1 }}
                       whileTap={{ scale: 0.9 }}
-                      title="Mais opções"
+                      title="More options"
                       className="p-2 rounded-full border-none bg-transparent cursor-pointer hover:bg-white/5 transition-colors"
                     >
                       <Sparkles
@@ -3647,7 +3647,7 @@ export default function ChatScreen() {
                                 color={forceThinking ? "var(--accent)" : "#9ca3af"}
                                 style={{ opacity: forceThinking ? 1 : 0.6 }}
                               />
-                              <span className="flex-1 min-w-0 text-[12px] text-gray-200 font-bold truncate">Pensar</span>
+                              <span className="flex-1 min-w-0 text-[12px] text-gray-200 font-bold truncate">Think</span>
                               {forceThinking && (
                                 <div className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
                               )}
@@ -3699,10 +3699,10 @@ export default function ChatScreen() {
                     whileTap={{ scale: 0.9 }}
                     title={
                       isRecording
-                        ? "Parar"
+                        ? "Stop"
                         : isTranscribing
-                          ? "Transcrevendo…"
-                          : "Gravar"
+                          ? "Transcribing…"
+                          : "Record"
                     }
                     className={`w-8 h-8 rounded-full flex items-center justify-center border-none cursor-pointer ${isRecording ? "mic-pulse" : ""}`}
                     style={{
@@ -3726,7 +3726,7 @@ export default function ChatScreen() {
                         whileTap={{ scale: 0.9 }}
                         className="w-8 h-8 rounded-full flex items-center justify-center border-none cursor-pointer"
                         style={{ background: "#2a1a1a" }}
-                        title="Parar tudo"
+                        title="Stop all"
                       >
                         <Square size={13} color="#ef4444" />
                       </motion.button>
@@ -3746,7 +3746,7 @@ export default function ChatScreen() {
                         whileHover={{ scale: 1.08 }}
                         whileTap={{ scale: 0.9 }}
                         className="w-8 h-8 rounded-full flex items-center justify-center border-none cursor-pointer disabled:cursor-default"
-                        title="Enviar"
+                        title="Send"
                       >
                         <Send size={14} color="#fff" />
                       </motion.button>

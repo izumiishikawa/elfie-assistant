@@ -672,10 +672,10 @@ export default memo(function CallOverlay({ chatId, characterName, characterAvata
             className="text-xs bg-transparent border-none outline-none cursor-pointer truncate"
             style={{ color: '#fff', minWidth: 0, flex: 1 }}
           >
-            <option value="" style={{ background: '#17171c', color: '#fff' }}>Padrão do sistema</option>
+            <option value="" style={{ background: '#17171c', color: '#fff' }}>System default</option>
             {audioDevices.map((d, i) => (
               <option key={d.deviceId || i} value={d.deviceId} style={{ background: '#17171c', color: '#fff' }}>
-                {d.label || `Microfone ${i + 1}`}
+                {d.label || `Microphone ${i + 1}`}
               </option>
             ))}
           </select>
@@ -703,7 +703,7 @@ export default memo(function CallOverlay({ chatId, characterName, characterAvata
                 transition:  'background-color 0.2s, color 0.2s',
               }}
             >
-              {p === 'elevenlabs' ? 'Scribe v2' : p === 'fishaudio' ? 'Fish Audio' : p === 'whisper' ? 'Whisper' : 'Navegador'}
+              {p === 'elevenlabs' ? 'Scribe v2' : p === 'fishaudio' ? 'Fish Audio' : p === 'whisper' ? 'Whisper' : 'Browser'}
             </motion.button>
           ))}
         </motion.div>

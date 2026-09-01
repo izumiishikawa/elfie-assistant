@@ -19,7 +19,7 @@ import {
 
 const fieldLabel = 'text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0';
 const smallInput = 'text-white text-[13px] bg-foreground border border-foreground rounded-xl px-3 py-2 outline-none w-full placeholder:text-gray-400';
-const DAY_LABELS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 const Spinner = () => <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent spin" />;
@@ -52,10 +52,10 @@ const TRIGGER_TYPES = new Set<WorkflowNodeType>(['webhook', 'schedule', 'routine
 
 const NODE_META: Record<WorkflowNodeType, { label: string; icon: React.ReactNode; color: string }> = {
   webhook: { label: 'Webhook', icon: <WebhookIcon size={13} />, color: '#5b9cff' },
-  schedule: { label: 'Agendado', icon: <Clock size={13} />, color: '#5b9cff' },
-  routine: { label: 'Rotina', icon: <Repeat size={13} />, color: '#5b9cff' },
+  schedule: { label: 'Scheduled', icon: <Clock size={13} />, color: '#5b9cff' },
+  routine: { label: 'Routine', icon: <Repeat size={13} />, color: '#5b9cff' },
   prompt: { label: 'Prompt', icon: <MessageSquare size={13} />, color: '#7dd3a8' },
-  condition: { label: 'Condição', icon: <GitBranch size={13} />, color: '#f0c674' },
+  condition: { label: 'Condition', icon: <GitBranch size={13} />, color: '#f0c674' },
   http_request: { label: 'HTTP', icon: <Globe size={13} />, color: '#e29ce2' },
 };
 
@@ -71,16 +71,16 @@ const NODE_DEFAULT_DATA: Record<WorkflowNodeType, Record<string, any>> = {
 function nodeSummary(type: WorkflowNodeType, data: Record<string, any>): string {
   switch (type) {
     case 'webhook':
-      return 'Recebe uma chamada externa';
+      return 'Receives an external call';
     case 'schedule':
       return `${pad2(data.hour ?? 9)}:${pad2(data.minute ?? 0)}`;
     case 'routine':
-      return 'Disparado por uma rotina';
+      return 'Triggered by a routine';
     case 'prompt':
-      return (data.prompt || 'Prompt vazio').slice(0, 70);
+      return (data.prompt || 'Empty prompt').slice(0, 70);
     case 'condition':
       return data.mode === 'llm'
-        ? (data.question || 'Pergunta vazia').slice(0, 60)
+        ? (data.question || 'Empty question').slice(0, 60)
         : `${data.field || '?'} ${data.operator || '?'} ${data.value ?? ''}`.trim();
     case 'http_request':
       return `${data.method || 'GET'} ${data.urlTemplate || ''}`.slice(0, 70);
@@ -131,8 +131,8 @@ function GenericNode({ id, data, selected, kind }: NodeProps & { kind: WorkflowN
           <Handle type="source" position={Position.Right} id="true" style={{ ...handleStyle, top: '28%', right: -8, background: '#3ecf6e' }} />
           <Handle type="source" position={Position.Right} id="false" style={{ ...handleStyle, top: '78%', right: -8, background: '#ff5c5c' }} />
           <div className="flex flex-col mt-3" style={{ gap: 14 }}>
-            <span className="text-[10px] font-bold text-green-400 text-right">Sim</span>
-            <span className="text-[10px] font-bold text-red-400 text-right">Não</span>
+            <span className="text-[10px] font-bold text-green-400 text-right">Yes</span>
+            <span className="text-[10px] font-bold text-red-400 text-right">No</span>
           </div>
         </>
       ) : (
@@ -163,7 +163,7 @@ function HttpRequestFields({ data, onPatch }: { data: Record<string, any>; onPat
 
   return (
     <>
-      <p className={fieldLabel}>MÉTODO E URL</p>
+      <p className={fieldLabel}>METHOD AND URL</p>
       <div className="flex gap-2 mb-4">
         <select value={data.method ?? 'GET'} onChange={(e) => onPatch({ method: e.target.value })} className={smallInput} style={{ width: 92, flexShrink: 0 }}>
           {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => <option key={m} value={m}>{m}</option>)}
@@ -171,7 +171,7 @@ function HttpRequestFields({ data, onPatch }: { data: Record<string, any>; onPat
         <input
           value={data.urlTemplate ?? ''}
           onChange={(e) => onPatch({ urlTemplate: e.target.value })}
-          placeholder="https://api.exemplo.com/reports/{{trigger.body.id}}"
+          placeholder="https://api.example.com/reports/{{trigger.body.id}}"
           className={smallInput}
         />
       </div>
@@ -181,7 +181,7 @@ function HttpRequestFields({ data, onPatch }: { data: Record<string, any>; onPat
         {headers.map((h, idx) => (
           <div key={idx} className="flex gap-1.5">
             <input value={h.key} onChange={(e) => updateHeader(idx, { key: e.target.value })} placeholder="Header" className={smallInput} />
-            <input value={h.value} onChange={(e) => updateHeader(idx, { value: e.target.value })} placeholder="Valor" className={smallInput} />
+            <input value={h.value} onChange={(e) => updateHeader(idx, { value: e.target.value })} placeholder="Value" className={smallInput} />
             <button onClick={() => removeHeader(idx)} className="p-2 rounded-lg border-none cursor-pointer bg-transparent hover:bg-destructive/10 flex-shrink-0">
               <Trash2 size={12} color="#ff382b" />
             </button>
@@ -195,7 +195,7 @@ function HttpRequestFields({ data, onPatch }: { data: Record<string, any>; onPat
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-none cursor-pointer bg-foreground hover:bg-foreground/70 mb-4"
       >
         <Plus size={11} color="#aaa" />
-        <span className="text-gray-300 text-[11px] font-semibold">Adicionar header</span>
+        <span className="text-gray-300 text-[11px] font-semibold">Add header</span>
       </motion.button>
 
       {hasBody && (
@@ -244,7 +244,7 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
         {type === 'webhook' && (
           webhookUrl ? (
             <>
-              <p className={fieldLabel}>URL DO WEBHOOK</p>
+              <p className={fieldLabel}>WEBHOOK URL</p>
               <div className="flex items-center gap-1.5 mb-3">
                 <input readOnly value={webhookUrl} onFocus={(e) => e.target.select()} className={`${smallInput} text-[11px]`} />
                 <button onClick={() => onCopy(webhookUrl)} className="p-2 rounded-lg border-none cursor-pointer bg-foreground hover:bg-foreground/70 flex-shrink-0">
@@ -261,7 +261,7 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
                   <Copy size={12} color="#aaa" />
                 </button>
               </div>
-              {copied && <p className="text-accent text-[11px] mb-2 m-0">Copiado!</p>}
+              {copied && <p className="text-accent text-[11px] mb-2 m-0">Copied!</p>}
               <motion.button
                 onClick={onRegenerate}
                 whileHover={{ scale: 1.03 }}
@@ -269,20 +269,20 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border-none cursor-pointer bg-foreground hover:bg-foreground/70 mt-1"
               >
                 <RefreshCw size={11} color="#aaa" />
-                <span className="text-gray-300 text-[11px] font-semibold">Gerar novo token/secret</span>
+                <span className="text-gray-300 text-[11px] font-semibold">Generate new token/secret</span>
               </motion.button>
               <p className="text-gray-300 text-[11px] mt-3 m-0">
-                Quem chamar essa URL precisa mandar o secret acima no header <code>X-Webhook-Secret</code>.
+                Whoever calls this URL needs to send the secret above in the <code>X-Webhook-Secret</code> header.
               </p>
             </>
           ) : (
-            <p className="text-gray-300 text-[12px] m-0">Salve a automação pra gerar a URL do webhook.</p>
+            <p className="text-gray-300 text-[12px] m-0">Save the automation to generate the webhook URL.</p>
           )
         )}
 
         {type === 'schedule' && (
           <>
-            <p className={fieldLabel}>HORÁRIO</p>
+            <p className={fieldLabel}>TIME</p>
             <input
               type="time"
               value={`${pad2(data.hour ?? 9)}:${pad2(data.minute ?? 0)}`}
@@ -292,7 +292,7 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
               }}
               className={smallInput}
             />
-            <p className={`${fieldLabel} mt-4`}>DIAS DA SEMANA</p>
+            <p className={`${fieldLabel} mt-4`}>DAYS OF THE WEEK</p>
             <div className="flex flex-wrap gap-1.5">
               {DAY_LABELS.map((label, d) => {
                 const days: number[] = data.daysOfWeek ?? [];
@@ -308,19 +308,19 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
                 );
               })}
             </div>
-            <p className="text-gray-300 text-[11px] mt-1.5 m-0">Nenhum dia selecionado = todo dia.</p>
+            <p className="text-gray-300 text-[11px] mt-1.5 m-0">No day selected = every day.</p>
           </>
         )}
 
         {type === 'routine' && (
           <>
             <p className="text-gray-300 text-[12px] mb-4 m-0">
-              Este nó dispara sempre que uma rotina configurada pra apontar pra esta automação roda
-              (campo "Automações disparadas" na tela de Rotinas).
+              This node triggers whenever a routine configured to point to this automation runs
+              (the "Triggered automations" field on the Routines screen).
             </p>
-            <p className={fieldLabel}>ROTINAS LIGADAS A ESTA AUTOMAÇÃO</p>
+            <p className={fieldLabel}>ROUTINES LINKED TO THIS AUTOMATION</p>
             {linkedRoutines.length === 0 ? (
-              <p className="text-gray-500 text-[12px] m-0">Nenhuma ainda.</p>
+              <p className="text-gray-500 text-[12px] m-0">None yet.</p>
             ) : (
               <div className="flex flex-col gap-1">
                 {linkedRoutines.map((r) => (
@@ -337,20 +337,20 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
             <textarea
               value={data.prompt ?? ''}
               onChange={(e) => onPatch({ prompt: e.target.value })}
-              placeholder="Ex: Leia o report {{trigger.body.title}} e decida o que fazer..."
+              placeholder="E.g.: Read the report {{trigger.body.title}} and decide what to do..."
               className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
               style={{ minHeight: 140 }}
             />
             <p className="text-gray-300 text-[11px] mt-1.5 mb-4 m-0">
-              Use {'{{trigger.body.x}}'} pro payload do gatilho, ou {'{{steps.<id>.output}}'} pro resultado de um step
-              anterior. Ela pode usar as mesmas ferramentas de uma conversa normal.
+              Use {'{{trigger.body.x}}'} for the trigger payload, or {'{{steps.<id>.output}}'} for the output of a previous
+              step. It can use the same tools as a normal conversation.
             </p>
             <div className="mb-3 flex items-center justify-between">
-              <p className={`${fieldLabel} mb-0`}>NOTIFICAÇÃO PUSH</p>
+              <p className={`${fieldLabel} mb-0`}>PUSH NOTIFICATION</p>
               <Switch checked={!!data.notify} onChange={() => onPatch({ notify: !data.notify })} />
             </div>
             <div className="flex items-center justify-between">
-              <p className={`${fieldLabel} mb-0`}>FORÇAR TTS</p>
+              <p className={`${fieldLabel} mb-0`}>FORCE TTS</p>
               <Switch checked={!!data.forceTts} onChange={() => onPatch({ forceTts: !data.forceTts })} />
             </div>
           </>
@@ -358,63 +358,63 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
 
         {type === 'condition' && (
           <>
-            <p className={fieldLabel}>MODO</p>
+            <p className={fieldLabel}>MODE</p>
             <div className="flex gap-1.5 mb-4">
               <button
                 onClick={() => onPatch({ mode: 'field' })}
                 className={`flex-1 py-1.5 rounded-full text-[11px] font-semibold border-none cursor-pointer ${data.mode !== 'llm' ? 'bg-accent text-white' : 'bg-foreground text-gray-400'}`}
               >
-                Campo
+                Field
               </button>
               <button
                 onClick={() => onPatch({ mode: 'llm' })}
                 className={`flex-1 py-1.5 rounded-full text-[11px] font-semibold border-none cursor-pointer ${data.mode === 'llm' ? 'bg-accent text-white' : 'bg-foreground text-gray-400'}`}
               >
-                Pergunta pra Elfie
+                Ask Elfie
               </button>
             </div>
             {data.mode === 'llm' ? (
               <>
-                <p className={fieldLabel}>PERGUNTA (sim/não)</p>
+                <p className={fieldLabel}>QUESTION (yes/no)</p>
                 <textarea
                   value={data.question ?? ''}
                   onChange={(e) => onPatch({ question: e.target.value })}
-                  placeholder="Ex: O report {{trigger.body.title}} menciona um bug crítico?"
+                  placeholder="E.g.: Does the report {{trigger.body.title}} mention a critical bug?"
                   className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
                   style={{ minHeight: 100 }}
                 />
               </>
             ) : (
               <>
-                <p className={fieldLabel}>CAMPO</p>
+                <p className={fieldLabel}>FIELD</p>
                 <input
                   value={data.field ?? ''}
                   onChange={(e) => onPatch({ field: e.target.value })}
                   placeholder="{{trigger.body.status}}"
                   className={`${smallInput} mb-3`}
                 />
-                <p className={fieldLabel}>OPERADOR</p>
+                <p className={fieldLabel}>OPERATOR</p>
                 <select
                   value={data.operator ?? 'equals'}
                   onChange={(e) => onPatch({ operator: e.target.value })}
                   className={`${smallInput} mb-3`}
                 >
-                  <option value="equals">É igual a</option>
-                  <option value="not_equals">É diferente de</option>
-                  <option value="contains">Contém</option>
-                  <option value="greater_than">Maior que</option>
-                  <option value="less_than">Menor que</option>
-                  <option value="exists">Existe / não está vazio</option>
+                  <option value="equals">Equals</option>
+                  <option value="not_equals">Not equal to</option>
+                  <option value="contains">Contains</option>
+                  <option value="greater_than">Greater than</option>
+                  <option value="less_than">Less than</option>
+                  <option value="exists">Exists / is not empty</option>
                 </select>
                 {data.operator !== 'exists' && (
                   <>
-                    <p className={fieldLabel}>VALOR</p>
+                    <p className={fieldLabel}>VALUE</p>
                     <input value={data.value ?? ''} onChange={(e) => onPatch({ value: e.target.value })} className={smallInput} />
                   </>
                 )}
               </>
             )}
-            <p className="text-gray-300 text-[11px] mt-3 m-0">As duas saídas do nó ("Sim" / "Não") decidem qual caminho seguir.</p>
+            <p className="text-gray-300 text-[11px] mt-3 m-0">The node's two outputs ("Yes" / "No") decide which path to follow.</p>
           </>
         )}
 
@@ -431,13 +431,13 @@ function RunHistoryPanel({ runs, onClose }: { runs: WorkflowRun[]; onClose: () =
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3.5 border-b border-foreground flex-shrink-0">
         <History size={14} color="#aaa" />
-        <span className="text-white font-semibold text-[13px] flex-1">Histórico</span>
+        <span className="text-white font-semibold text-[13px] flex-1">History</span>
         <button onClick={onClose} className="p-1.5 rounded-full border-none cursor-pointer bg-transparent hover:bg-foreground/60">
           <X size={13} color="#888" />
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {runs.length === 0 && <p className="text-gray-500 text-[12px] text-center py-8 m-0">Nenhuma execução ainda.</p>}
+        {runs.length === 0 && <p className="text-gray-500 text-[12px] text-center py-8 m-0">No runs yet.</p>}
         <div className="flex flex-col gap-2">
           {runs.map((run) => (
             <div key={run._id} className="rounded-xl bg-foreground px-3 py-2.5 cursor-pointer" onClick={() => setExpanded((id) => (id === run._id ? null : run._id))}>
@@ -445,11 +445,11 @@ function RunHistoryPanel({ runs, onClose }: { runs: WorkflowRun[]; onClose: () =
                 <span
                   className={`text-[11px] font-bold ${run.status === 'success' ? 'text-green-400' : run.status === 'error' ? 'text-destructive' : 'text-gray-400'}`}
                 >
-                  {run.status === 'success' ? 'Sucesso' : run.status === 'error' ? 'Erro' : 'Rodando'}
+                  {run.status === 'success' ? 'Success' : run.status === 'error' ? 'Error' : 'Running'}
                 </span>
                 <span className="text-gray-400 text-[10px]">{new Date(run.startedAt).toLocaleString('pt-BR')}</span>
               </div>
-              <p className="text-gray-300 text-[10px] m-0 mt-0.5">gatilho: {run.trigger.type}</p>
+              <p className="text-gray-300 text-[10px] m-0 mt-0.5">trigger: {run.trigger.type}</p>
               {expanded === run._id && (
                 <div className="mt-2 pt-2 border-t border-background flex flex-col gap-1.5">
                   {run.steps.map((s, i) => (
@@ -510,7 +510,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
         source: e.source,
         target: e.target,
         sourceHandle: e.sourceHandle ?? undefined,
-        label: e.sourceHandle === 'true' ? 'Sim' : e.sourceHandle === 'false' ? 'Não' : undefined,
+        label: e.sourceHandle === 'true' ? 'Yes' : e.sourceHandle === 'false' ? 'No' : undefined,
       })),
     );
     setName(workflow.name);
@@ -527,7 +527,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
       {
         ...connection,
         id: newEdgeId(),
-        label: connection.sourceHandle === 'true' ? 'Sim' : connection.sourceHandle === 'false' ? 'Não' : undefined,
+        label: connection.sourceHandle === 'true' ? 'Yes' : connection.sourceHandle === 'false' ? 'No' : undefined,
       },
       eds,
     ));
@@ -565,7 +565,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
   }, [selectedNodeId, setNodes]);
 
   const save = useCallback(async () => {
-    if (!name.trim()) { setError('Nome obrigatório.'); return; }
+    if (!name.trim()) { setError('Name required.'); return; }
     setError('');
     setSaving(true);
     const payloadNodes: WorkflowNode[] = nodes.map((n) => ({
@@ -584,11 +584,11 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
       name: name.trim(), enabled, characterId: characterId || null, nodes: payloadNodes, edges: payloadEdges,
     });
     setSaving(false);
-    if (!result.ok) setError(result.error || 'Erro ao salvar.');
+    if (!result.ok) setError(result.error || 'Failed to save.');
   }, [name, enabled, characterId, nodes, edges, workflowId, updateWorkflow]);
 
   const handleDelete = useCallback(async () => {
-    if (!window.confirm(`Apagar a automação "${name || 'sem nome'}"? Isso não pode ser desfeito.`)) return;
+    if (!window.confirm(`Delete automation "${name || 'untitled'}"? This cannot be undone.`)) return;
     setDeleting(true);
     await deleteWorkflow(workflowId);
     setDeleting(false);
@@ -600,7 +600,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
     try {
       payload = testPayload.trim() ? JSON.parse(testPayload) : {};
     } catch {
-      setError('JSON de teste inválido.');
+      setError('Invalid test JSON.');
       return;
     }
     setError('');
@@ -612,12 +612,12 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
       setShowHistory(true);
       setSelectedNodeId(null);
     } else {
-      setError(result.error || 'Falhou ao testar.');
+      setError(result.error || 'Test failed.');
     }
   }, [testPayload, workflowId, runWorkflowNow]);
 
   const regenerate = useCallback(async () => {
-    if (!window.confirm('Gerar novo token/secret? A URL antiga deixa de funcionar.')) return;
+    if (!window.confirm('Generate a new token/secret? The old URL will stop working.')) return;
     await regenerateWebhook(workflowId);
   }, [workflowId, regenerateWebhook]);
 
@@ -636,8 +636,8 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
   if (!workflow) {
     return (
       <div className="flex flex-col h-full items-center justify-center gap-3">
-        <span className="text-gray-500 text-[13px]">Automação não encontrada.</span>
-        <button onClick={onClose} className="text-accent text-[12px] font-semibold bg-transparent border-none cursor-pointer">Voltar</button>
+        <span className="text-gray-500 text-[13px]">Automation not found.</span>
+        <button onClick={onClose} className="text-accent text-[12px] font-semibold bg-transparent border-none cursor-pointer">Back</button>
       </div>
     );
   }
@@ -656,7 +656,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Nome da automação"
+          placeholder="Automation name"
           className="text-white font-semibold text-[14px] bg-transparent border-none outline-none flex-1 min-w-0 placeholder:text-gray-500"
         />
         <select
@@ -664,7 +664,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
           onChange={(e) => setCharacterId(e.target.value)}
           className="text-[11px] bg-foreground border-none rounded-full px-2.5 py-1.5 text-gray-300 outline-none flex-shrink-0"
         >
-          <option value="">Personagem ativo</option>
+          <option value="">Active character</option>
           {characters.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
         </select>
         <Switch checked={enabled} onChange={() => setEnabled((v) => !v)} size="sm" />
@@ -683,14 +683,14 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
           className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20 flex-shrink-0"
         >
           <Play size={11} color="var(--accent)" />
-          <span className="text-accent font-semibold text-[12px]">Testar</span>
+          <span className="text-accent font-semibold text-[12px]">Test</span>
         </motion.button>
         <motion.button
           onClick={handleDelete}
           disabled={deleting}
           whileHover={{ scale: 1.06 }}
           whileTap={{ scale: 0.94 }}
-          title="Apagar automação"
+          title="Delete automation"
           className="p-2 rounded-full border-none cursor-pointer flex-shrink-0 bg-foreground hover:bg-destructive/10 disabled:opacity-50 transition-colors"
         >
           {deleting ? <Spinner /> : <Trash2 size={14} color="#ff382b" />}
@@ -702,7 +702,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
           whileTap={{ scale: 0.95 }}
           className="h-8 px-5 rounded-full bg-accent border-none cursor-pointer flex items-center justify-center min-w-[70px] disabled:opacity-50 transition-opacity flex-shrink-0"
         >
-          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Salvar</span>}
+          {saving ? <Spinner /> : <span className="text-white font-bold text-[12px]">Save</span>}
         </motion.button>
       </div>
 
@@ -757,9 +757,9 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
               onClick={() => setShowTestModal(false)}
             >
               <div className="bg-background border border-foreground rounded-2xl p-5" style={{ width: 420 }} onClick={(e) => e.stopPropagation()}>
-                <p className="text-white font-semibold text-[14px] mb-3 m-0">Testar automação</p>
-                <p className={fieldLabel}>PAYLOAD DE EXEMPLO (JSON)</p>
-                <p className="text-gray-300 text-[11px] mt-0.5 mb-2 m-0">Vira o {'{{trigger.body}}'} disponível pros nós, como se fosse o body de um webhook real.</p>
+                <p className="text-white font-semibold text-[14px] mb-3 m-0">Test automation</p>
+                <p className={fieldLabel}>SAMPLE PAYLOAD (JSON)</p>
+                <p className="text-gray-300 text-[11px] mt-0.5 mb-2 m-0">Becomes the {'{{trigger.body}}'} available to the nodes, as if it were the body of a real webhook.</p>
                 <textarea
                   value={testPayload}
                   onChange={(e) => setTestPayload(e.target.value)}
@@ -771,7 +771,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
                     onClick={() => setShowTestModal(false)}
                     className="px-4 py-2 rounded-full border-none cursor-pointer bg-foreground text-gray-300 text-[12px] font-semibold"
                   >
-                    Cancelar
+                    Cancel
                   </button>
                   <motion.button
                     onClick={runTest}
@@ -781,7 +781,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
                     className="px-4 py-2 rounded-full border-none cursor-pointer bg-accent text-white text-[12px] font-semibold disabled:opacity-50 flex items-center gap-1.5"
                   >
                     {testing && <Spinner />}
-                    {testing ? 'Rodando...' : 'Rodar'}
+                    {testing ? 'Running...' : 'Run'}
                   </motion.button>
                 </div>
               </div>
@@ -807,7 +807,7 @@ export default function WorkflowEditor({ workflowId, characters, routines, onClo
           ) : (
             <div className="flex-1 flex items-center justify-center p-6">
               <p className="text-gray-500 text-[12px] text-center m-0">
-                Clique num nó na paleta pra adicionar, conecte os pontos arrastando das bolinhas, e clique num nó pra editar.
+                Click a node in the palette to add it, connect the dots by dragging the handles, and click a node to edit it.
               </p>
             </div>
           )}
