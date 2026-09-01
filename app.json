@@ -73,7 +73,7 @@
       ]
     ],
     "extra": {
-      "apiUrl": "http://192.168.100.56:3000",
+      "apiUrl": "http://localhost:3000",
       "eas": {
         "projectId": "1d7d0b6d-212e-4dac-a8b5-5b4fa02f484b"
       }

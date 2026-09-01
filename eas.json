@@ -11,7 +11,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.100.56:3000"
+        "EXPO_PUBLIC_API_URL": "http://localhost:3000"
       }
     },
     "preview": {
@@ -21,7 +21,7 @@
       },
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.100.56:3000"
+        "EXPO_PUBLIC_API_URL": "http://localhost:3000"
       }
     },
     "production": {
@@ -29,7 +29,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.100.56:3000"
+        "EXPO_PUBLIC_API_URL": "http://localhost:3000"
       }
     }
   }

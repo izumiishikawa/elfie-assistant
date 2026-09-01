@@ -14,7 +14,7 @@ const DEFAULT_API_BASE: string =
   envUrl ??
   (isEmulator && Platform.OS === "android"
     ? "http://10.0.2.2:3000"
-    : "http://192.168.100.56:3000");
+    : "http://localhost:3000");
 
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
