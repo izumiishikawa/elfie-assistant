@@ -1,0 +1,5 @@
+node_modules/
+.env
+browser-profile/
+browser-extensions/*
+!browser-extensions/README.md

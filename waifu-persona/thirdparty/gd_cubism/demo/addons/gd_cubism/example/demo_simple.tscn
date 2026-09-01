@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://dab25molfpkce"]
+
+[node name="simple" type="Node2D"]
+
+[node name="GDCubismUserModel" type="GDCubismUserModel" parent="."]
+position = Vector2(640, 360)
+scale = Vector2(0.075, 0.075)
+
+[node name="GDCubismEffectEyeBlink" type="GDCubismEffectEyeBlink" parent="GDCubismUserModel"]
+
+[node name="GDCubismEffectBreath" type="GDCubismEffectBreath" parent="GDCubismUserModel"]

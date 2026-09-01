@@ -1,0 +1,5 @@
+# Hand-tracking venv (mediapipe + opencv) — set up by hand_tracker.py's own bootstrap
+# on first run, not something to commit; see run_mind_overlay's use of it in
+# elfie_overlay.py. Same idea for the downloaded .task model file.
+hand_tracking_venv/
+models/*.task

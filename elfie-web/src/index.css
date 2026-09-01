@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --accent: #996dff;
+  --accent-rgb: 153 109 255;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #17171c;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+@keyframes typing-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.typing-dot {
+  animation: typing-bounce 600ms ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-200%); }
+  100% { transform: translateX(200%); }
+}
+
+.shimmer-animation {
+  animation: shimmer 1.5s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  50%       { box-shadow: 0 0 0 7px rgba(239, 68, 68, 0); }
+}
+
+.mic-pulse {
+  animation: mic-pulse 1s ease-in-out infinite;
+}
+
+@keyframes neuro-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+.neuro-pulse {
+  animation: neuro-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.message-in {
+  animation: message-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes voice-bar {
+  from { height: 4px; }
+  to   { height: 28px; }
+}
+
+@keyframes call-glow-idle {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  50%      { opacity: 0.4;  transform: scale(1.03); }
+}
+@keyframes call-glow-active {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 0.9;  transform: scale(1.08); }
+}
+.call-glow {
+  animation: call-glow-idle 3.2s ease-in-out infinite;
+  filter: blur(4px);
+}
+.call-glow[data-speaking="true"] {
+  animation: call-glow-active 1.2s ease-in-out infinite;
+}
+
+@keyframes call-breathe-idle {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.02); }
+}
+@keyframes call-breathe-active {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.015); }
+}
+.call-breathe {
+  animation: call-breathe-idle 4s ease-in-out infinite;
+  transition: border-color 0.3s;
+}
+.call-breathe--active {
+  animation: call-breathe-active 1.2s ease-in-out infinite;
+}
+
+.chat-messages::-webkit-scrollbar {
+  width: 4px;
+}
+.chat-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-messages::-webkit-scrollbar-thumb {
+  background: #282838;
+  border-radius: 2px;
+}

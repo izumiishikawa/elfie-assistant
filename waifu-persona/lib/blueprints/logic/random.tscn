@@ -1,0 +1,154 @@
+[gd_scene format=3 uid="uid://c9rndmtscn001"]
+
+[ext_resource type="Script" uid="uid://c9rndomgd0001" path="res://lib/blueprints/logic/random.gd" id="1_rnd01"]
+
+[node name="Random" type="GraphNode" unique_id=1234500001]
+custom_minimum_size = Vector2(280, 0)
+offset_right = 106.0
+offset_bottom = 88.0
+title = "Random"
+slot/0/left_enabled = false
+slot/0/left_type = 0
+slot/0/left_color = Color(1, 1, 1, 1)
+slot/0/left_icon = null
+slot/0/right_enabled = true
+slot/0/right_type = 1
+slot/0/right_color = Color(1, 1, 1, 1)
+slot/0/right_icon = null
+slot/0/draw_stylebox = true
+slot/1/left_enabled = false
+slot/1/left_type = 0
+slot/1/left_color = Color(1, 1, 1, 1)
+slot/1/left_icon = null
+slot/1/right_enabled = false
+slot/1/right_type = 0
+slot/1/right_color = Color(1, 1, 1, 1)
+slot/1/right_icon = null
+slot/1/draw_stylebox = true
+slot/2/left_enabled = false
+slot/2/left_type = 0
+slot/2/left_color = Color(1, 1, 1, 1)
+slot/2/left_icon = null
+slot/2/right_enabled = false
+slot/2/right_type = 0
+slot/2/right_color = Color(1, 1, 1, 1)
+slot/2/right_icon = null
+slot/2/draw_stylebox = true
+slot/3/left_enabled = false
+slot/3/left_type = 0
+slot/3/left_color = Color(1, 1, 1, 1)
+slot/3/left_icon = null
+slot/3/right_enabled = false
+slot/3/right_type = 0
+slot/3/right_color = Color(1, 1, 1, 1)
+slot/3/right_icon = null
+slot/3/draw_stylebox = true
+script = ExtResource("1_rnd01")
+
+[node name="RowOutput" type="HBoxContainer" parent="." unique_id=1234500002]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Label" type="Label" parent="RowOutput" unique_id=1234500003]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Out"
+
+[node name="Output" type="SpinBox" parent="RowOutput" unique_id=1234500004]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(90, 0)
+layout_mode = 2
+min_value = -9999.0
+max_value = 9999.0
+step = 0.001
+editable = false
+alignment = 2
+
+[node name="RowMinMax" type="HBoxContainer" parent="." unique_id=1234500005]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LabelMin" type="Label" parent="RowMinMax" unique_id=1234500006]
+layout_mode = 2
+text = "Min"
+
+[node name="Min" type="SpinBox" parent="RowMinMax" unique_id=1234500007]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+min_value = -9999.0
+max_value = 9999.0
+step = 0.01
+value = -1.0
+alignment = 2
+
+[node name="LabelMax" type="Label" parent="RowMinMax" unique_id=1234500008]
+layout_mode = 2
+text = "Max"
+
+[node name="Max" type="SpinBox" parent="RowMinMax" unique_id=1234500009]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+min_value = -9999.0
+max_value = 9999.0
+step = 0.01
+value = 1.0
+alignment = 2
+
+[node name="RowTiming" type="HBoxContainer" parent="." unique_id=1234500010]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="LabelHold" type="Label" parent="RowTiming" unique_id=1234500011]
+layout_mode = 2
+text = "Hold"
+
+[node name="Hold" type="SpinBox" parent="RowTiming" unique_id=1234500012]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+min_value = 0.0
+max_value = 60000.0
+step = 10.0
+value = 1000.0
+alignment = 2
+suffix = "ms"
+
+[node name="LabelTrans" type="Label" parent="RowTiming" unique_id=1234500013]
+layout_mode = 2
+text = "Trans"
+
+[node name="Transition" type="SpinBox" parent="RowTiming" unique_id=1234500014]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+min_value = 0.0
+max_value = 60000.0
+step = 10.0
+value = 500.0
+alignment = 2
+suffix = "ms"
+
+[node name="RowSeed" type="HBoxContainer" parent="." unique_id=1234500015]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="UseSeed" type="CheckBox" parent="RowSeed" unique_id=1234500016]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Seed"
+
+[node name="Seed" type="SpinBox" parent="RowSeed" unique_id=1234500017]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 2147483647.0
+step = 1.0
+value = 0.0
+editable = false
+alignment = 2
+
+[connection signal="toggled" from="RowSeed/UseSeed" to="." method="_on_use_seed_toggled"]

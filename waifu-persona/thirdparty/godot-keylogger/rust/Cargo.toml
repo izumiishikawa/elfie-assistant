@@ -1,0 +1,15 @@
+[package]
+name = "godot-keylogger"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = { version = "0.2.4", features = ["experimental-threads"] }
+libc = "0.2.169"
+
+[target.x86_64-unknown-linux-gnu.dependencies]
+evdev = "0.12.2"
+input = "0.9.1"

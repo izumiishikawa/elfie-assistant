@@ -1,0 +1,731 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function () {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W, H, CX, CY;
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    CX = W / 2; CY = H / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  const apiBase = new URLSearchParams(location.search).get('api') || 'http://localhost:3000';
+
+  function rotatePoint([x, y, z], ax, ay, az) {
+    let y1 = y * Math.cos(ax) - z * Math.sin(ax);
+    let z1 = y * Math.sin(ax) + z * Math.cos(ax);
+    let x2 = x * Math.cos(ay) + z1 * Math.sin(ay);
+    let z2 = -x * Math.sin(ay) + z1 * Math.cos(ay);
+    let x3 = x2 * Math.cos(az) - y1 * Math.sin(az);
+    let y3 = x2 * Math.sin(az) + y1 * Math.cos(az);
+    return [x3, y3, z2];
+  }
+  function project([x, y, z], dist) {
+    const f = dist / (dist - z);
+    return [x * f, y * f, f];
+  }
+
+  function rotate2D(x, y, angle) {
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return [x * c - y * s, x * s + y * c];
+  }
+
+  function fibonacciSphere(i, n, radius) {
+    if (n <= 1) return [0, 0, radius];
+    const gAngle = Math.PI * (3 - Math.sqrt(5));
+    const y = 1 - (i / (n - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const theta = gAngle * i;
+    return [Math.cos(theta) * r * radius, y * radius, Math.sin(theta) * r * radius];
+  }
+
+  const KIND_COLOR = {
+    core:        [255, 255, 255],
+    package:     [229, 231, 235],
+    skill:       [180, 186, 196],
+    kfolder:     [242, 184, 75],
+    kfile:       [201, 149, 79],
+    integration: [255, 255, 255],
+    itool:       [122, 162, 247],
+  };
+  const KIND_RADIUS = { core: 24, package: 11, kfolder: 11, integration: 11, skill: 5.5, kfile: 5, itool: 5 };
+
+  function buildGraph({ characterName, skills, packages, folders, integrations }) {
+    const nodes = [];
+    const idIndex = new Map();
+    const links = [];
+    const childrenOf = new Map();
+
+    function addNode(id, label, kind) {
+      const idx = nodes.length;
+      nodes.push({ id, label, kind, base: [0, 0, 0], scale: 0, vx: 0, vy: 0 });
+      idIndex.set(id, idx);
+      return idx;
+    }
+    function link(parentId, childId) {
+      const bend = (0.16 + Math.random() * 0.26) * (Math.random() < 0.5 ? 1 : -1);
+      const phase = Math.random() * Math.PI * 2;
+      links.push({ a: idIndex.get(parentId), b: idIndex.get(childId), bend, phase });
+      if (!childrenOf.has(parentId)) childrenOf.set(parentId, []);
+      childrenOf.get(parentId).push(childId);
+    }
+
+    addNode('core', characterName || 'Elfie', 'core');
+
+    const pkgIds = new Set();
+    for (const pkg of packages || []) {
+      const pid = 'pkg:' + pkg._id;
+      addNode(pid, pkg.name, 'package');
+      link('core', pid);
+      pkgIds.add(String(pkg._id));
+    }
+    for (const skill of skills || []) {
+      if (!skill.enabled) continue;
+      const sid = 'skill:' + skill._id;
+      addNode(sid, skill.name, 'skill');
+      if (skill.packageId && pkgIds.has(String(skill.packageId))) {
+        link('pkg:' + skill.packageId, sid);
+      } else {
+        link('core', sid);
+      }
+    }
+    for (const folder of folders || []) {
+      const fid = 'kfolder:' + folder.name;
+      addNode(fid, folder.name, 'kfolder');
+      link('core', fid);
+      for (const file of folder.files || []) {
+        const fileId = 'kfile:' + folder.name + '/' + file;
+        addNode(fileId, file, 'kfile');
+        link(fid, fileId);
+      }
+    }
+    for (const integ of integrations || []) {
+      if (!integ.connected) continue;
+      const iid = 'integration:' + integ.service;
+      addNode(iid, integ.service, 'integration');
+      link('core', iid);
+      for (const tool of integ.tools || []) {
+        const tid = 'itool:' + integ.service + ':' + tool.name;
+        addNode(tid, tool.label || tool.name, 'itool');
+        link(iid, tid);
+      }
+    }
+
+    return { nodes, links, idIndex, childrenOf };
+  }
+
+  const FLATTEN_Z = 0.22;
+
+  function layout(nodes, idIndex, childrenOf, R1, R2) {
+    for (const [parentId, children] of childrenOf) {
+      const parentIdx = idIndex.get(parentId);
+      const parentBase = nodes[parentIdx].base;
+      const radius = parentId === 'core' ? R1 : R2;
+      children.forEach((childId, i) => {
+        const idx = idIndex.get(childId);
+        const off = fibonacciSphere(i, children.length, radius);
+        nodes[idx].base = [parentBase[0] + off[0], parentBase[1] + off[1], parentBase[2] + off[2] * FLATTEN_Z];
+      });
+    }
+  }
+
+  const SPAWN_RADIUS = 20;
+
+  function finalizeLayout(nodes, links, opts) {
+    links.forEach((l) => {
+      const a = nodes[l.a].base, b = nodes[l.b].base;
+      l.restDist = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    });
+    nodes.forEach((n) => { n.targetBase = [n.base[0], n.base[1], n.base[2]]; });
+    if (opts && opts.burst) {
+      nodes.forEach((n, i) => {
+        if (i === 0) return;
+        const angle = Math.atan2(n.base[1], n.base[0]);
+        n.base = [Math.cos(angle) * SPAWN_RADIUS, Math.sin(angle) * SPAWN_RADIUS, 0];
+      });
+    }
+  }
+
+  async function fetchJson(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('http ' + res.status);
+    return res.json();
+  }
+
+  async function loadMindData() {
+    const [charsR, skillsR, pkgsR, foldersR, integR] = await Promise.allSettled([
+      fetchJson(`${apiBase}/api/characters`),
+      fetchJson(`${apiBase}/api/skills`),
+      fetchJson(`${apiBase}/api/skill-packages`),
+      fetchJson(`${apiBase}/api/knowledge`),
+      fetchJson(`${apiBase}/api/integrations`),
+    ]);
+    const val = (r, fallback) => (r.status === 'fulfilled' ? r.value : fallback);
+    const chars = val(charsR, {});
+    let characterName = 'Elfie';
+    if (chars && Array.isArray(chars.characters)) {
+      const active = chars.characters.find((c) => String(c._id) === String(chars.activeCharacterId))
+        || chars.characters[0];
+      if (active && active.name) characterName = active.name;
+    }
+    return {
+      characterName,
+      skills: val(skillsR, []),
+      packages: val(pkgsR, []),
+      folders: val(foldersR, []),
+      integrations: val(integR, []),
+    };
+  }
+
+  let graph = null;
+  let t = 0;
+  let rotY = 0;
+  const IDLE_ROT_SPEED = 0.015;
+  const GRAPH_MAX_VH = 0.9;
+  const graphScale = () => Math.min(W, H, (GRAPH_MAX_VH * H) / 1.1);
+  const R1 = () => graphScale() * 0.40;
+  const R2 = () => graphScale() * 0.15;
+
+  let hand = null;
+  window.mindGraphHandUpdate = function (data) {
+    hand = (data && data.present) ? data : null;
+  };
+
+  let grabbedNodeIndex = null;
+  let frozenAngle = null;
+  let lastCursorX = 0, lastCursorY = 0;
+  let lastProj = null;
+  const PICK_RADIUS = 26;
+
+  let fullGraph = null;
+  let packageList = [];
+  let viewIndex = -1;
+  let graphT0 = 0;
+  let prevFist = false;
+  let lastViewSwitchT = -999;
+  const VIEW_SWITCH_COOLDOWN_S = 1.0;
+
+  function activateGraph(newGraph) {
+    graph = newGraph;
+    graphT0 = t;
+    grabbedNodeIndex = null; frozenAngle = null;
+    renderPos = null; lastProj = null;
+  }
+
+  function buildPackageSubgraph(pkgIndex) {
+    const pkgNode = fullGraph.nodes[pkgIndex];
+    const childIds = fullGraph.childrenOf.get(pkgNode.id) || [];
+    const nodes = [];
+    const idIndex = new Map();
+    const links = [];
+    function addNode(id, label, kind) {
+      const idx = nodes.length;
+      nodes.push({ id, label, kind, base: [0, 0, 0], scale: 0, vx: 0, vy: 0 });
+      idIndex.set(id, idx);
+      return idx;
+    }
+    addNode(pkgNode.id, pkgNode.label, 'core');
+    childIds.forEach((childId) => {
+      const src = fullGraph.nodes[fullGraph.idIndex.get(childId)];
+      const idx = addNode(childId, src.label, src.kind);
+      links.push({ a: 0, b: idx, bend: (0.16 + Math.random() * 0.26) * (Math.random() < 0.5 ? 1 : -1), phase: Math.random() * Math.PI * 2 });
+    });
+
+    const radius = R1();
+    nodes.forEach((n, i) => {
+      if (i === 0) return;
+      const off = fibonacciSphere(i - 1, nodes.length - 1, radius);
+      n.base = [off[0], off[1], off[2] * FLATTEN_Z];
+    });
+    nodes.forEach((n, i) => {
+      n.revealAt = (i / nodes.length) * MAX_STAGGER_SPAN;
+      n.r0 = KIND_RADIUS[n.kind] || 5;
+    });
+    finalizeLayout(nodes, links, { burst: true });
+
+    return { nodes, links, idIndex };
+  }
+
+  function advanceView() {
+    if (!fullGraph || packageList.length === 0) return;
+    viewIndex += 1;
+    if (viewIndex >= packageList.length) viewIndex = -1;
+    activateGraph(viewIndex === -1 ? fullGraph : buildPackageSubgraph(packageList[viewIndex]));
+  }
+
+  const REPEL_K = 5500;
+  const LINK_K = 9;
+  const CENTER_K = 0.6;
+  const PHYSICS_DAMPING = 5;
+  const MAX_SPEED = 2000;
+  const COLLIDE_PADDING = 10;
+  const COLLIDE_K = 70;
+  const HOME_K = 4;
+
+  function stepPhysics(dt) {
+    const nodes = graph.nodes;
+    const n = nodes.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = b.base[0] - a.base[0];
+        let dy = b.base[1] - a.base[1];
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = dx * dx + dy * dy; }
+        const d = Math.sqrt(d2);
+        const charge = REPEL_K / d2;
+        const minDist = (a.r0 || 5) + (b.r0 || 5) + COLLIDE_PADDING;
+        const collide = d < minDist ? (minDist - d) * COLLIDE_K : 0;
+        const f = charge + collide;
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        if (i !== grabbedNodeIndex && i !== 0) { a.vx -= fx * dt; a.vy -= fy * dt; }
+        if (j !== grabbedNodeIndex && j !== 0) { b.vx += fx * dt; b.vy += fy * dt; }
+      }
+    }
+    for (const l of graph.links) {
+      const a = nodes[l.a], b = nodes[l.b];
+      const dx = b.base[0] - a.base[0], dy = b.base[1] - a.base[1];
+      const d = Math.hypot(dx, dy) || 0.0001;
+      const stretch = (d - l.restDist) * LINK_K;
+      const fx = (dx / d) * stretch, fy = (dy / d) * stretch;
+      if (l.a !== grabbedNodeIndex && l.a !== 0) { a.vx += fx * dt; a.vy += fy * dt; }
+      if (l.b !== grabbedNodeIndex && l.b !== 0) { b.vx -= fx * dt; b.vy -= fy * dt; }
+    }
+    let cx = 0, cy = 0;
+    for (let i = 1; i < n; i++) { cx += nodes[i].base[0]; cy += nodes[i].base[1]; }
+    if (n > 1) { cx /= (n - 1); cy /= (n - 1); }
+    const shiftX = -cx * CENTER_K * dt, shiftY = -cy * CENTER_K * dt;
+    const dampFactor = Math.exp(-PHYSICS_DAMPING * dt);
+    for (let i = 0; i < n; i++) {
+      if (i === grabbedNodeIndex || i === 0) continue;
+      const nd = nodes[i];
+      if (nd.targetBase) {
+        nd.vx += (nd.targetBase[0] - nd.base[0]) * HOME_K * dt;
+        nd.vy += (nd.targetBase[1] - nd.base[1]) * HOME_K * dt;
+      }
+      nd.vx *= dampFactor; nd.vy *= dampFactor;
+      const speed = Math.hypot(nd.vx, nd.vy);
+      if (speed > MAX_SPEED) { nd.vx = (nd.vx / speed) * MAX_SPEED; nd.vy = (nd.vy / speed) * MAX_SPEED; }
+      nd.base[0] += nd.vx * dt + shiftX;
+      nd.base[1] += nd.vy * dt + shiftY;
+    }
+  }
+
+  let renderPos = null;
+  const FOLLOW_STIFFNESS = 80;
+  const FOLLOW_DAMPING = 5;
+
+  const MAX_STAGGER_SPAN = 0.5;
+  const RISE_DURATION = 0.18;
+
+  function smoothstep(x) {
+    x = Math.max(0, Math.min(1, x));
+    return x * x * (3 - 2 * x);
+  }
+
+  loadMindData().then((data) => {
+    graph = buildGraph(data);
+    const maxExtent = R1() + R2();
+    layout(graph.nodes, graph.idIndex, graph.childrenOf, R1(), R2());
+
+    const desiredHalfWidth = W * 0.475;
+    const stretchX = Math.max(1, desiredHalfWidth / maxExtent);
+    graph.nodes.forEach((n) => { n.base[0] *= stretchX; });
+
+    graph.nodes.forEach((n, i) => {
+      n.revealAt = (i / graph.nodes.length) * MAX_STAGGER_SPAN;
+      n.r0 = KIND_RADIUS[n.kind] || 5;
+    });
+
+    finalizeLayout(graph.nodes, graph.links);
+
+    fullGraph = graph;
+    packageList = [];
+    graph.nodes.forEach((n, i) => { if (n.kind === 'package') packageList.push(i); });
+    graphT0 = t;
+  }).catch(() => {
+    graph = buildGraph({ characterName: 'Elfie', skills: [], packages: [], folders: [], integrations: [] });
+    fullGraph = graph;
+    packageList = [];
+    graphT0 = t;
+  });
+
+  function drawRing(radius, rot, squash, color, dash, width) {
+    ctx.save();
+    ctx.rotate(rot);
+    ctx.scale(1, squash);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius, radius, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const ICO_VERTS = [
+    [-1, PHI, 0], [1, PHI, 0], [-1, -PHI, 0], [1, -PHI, 0],
+    [0, -1, PHI], [0, 1, PHI], [0, -1, -PHI], [0, 1, -PHI],
+    [PHI, 0, -1], [PHI, 0, 1], [-PHI, 0, -1], [-PHI, 0, 1],
+  ].map(([x, y, z]) => {
+    const l = Math.hypot(x, y, z);
+    return [x / l, y / l, z / l];
+  });
+  const ICO_EDGES = [
+    [0, 1], [0, 5], [0, 7], [0, 10], [0, 11],
+    [1, 5], [1, 7], [1, 8], [1, 9],
+    [2, 3], [2, 4], [2, 6], [2, 10], [2, 11],
+    [3, 4], [3, 6], [3, 8], [3, 9],
+    [4, 5], [4, 9], [4, 11],
+    [5, 9], [5, 11],
+    [6, 7], [6, 8], [6, 10],
+    [7, 8], [7, 10],
+    [8, 9],
+    [10, 11],
+  ];
+  const CORE_BASE_R = KIND_RADIUS.core * 2.2;
+  let sageRotX = Math.random() * 10, sageRotY = Math.random() * 10, sageRotZ = Math.random() * 10;
+  let ringRot1 = 0, ringRot2 = Math.PI / 3;
+  const sageParticles = [];
+  function spawnSageParticle() {
+    sageParticles.push({
+      angle: Math.random() * Math.PI * 2,
+      speed: 0.35 + Math.random() * 0.9,
+      r: 6 + Math.random() * 8,
+      size: 0.8 + Math.random() * 1.8,
+      life: 1,
+      decay: 0.003 + Math.random() * 0.006,
+    });
+  }
+
+  function drawGreatSageCore(dt, alpha) {
+    if (alpha <= 0.01) return;
+    const baseR = CORE_BASE_R * alpha;
+    const nucleusR = baseR * 0.20;
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    const rayCount = 14;
+    for (let i = 0; i < rayCount; i++) {
+      const a = (i / rayCount) * Math.PI * 2 + t * 0.05;
+      const len = baseR * (1.25 + 0.5 * Math.sin(t * 1.3 + i));
+      const grad = ctx.createLinearGradient(0, 0, Math.cos(a) * len, Math.sin(a) * len);
+      grad.addColorStop(0, `rgba(230,232,238,${0.5 * alpha})`);
+      grad.addColorStop(1, 'rgba(230,232,238,0)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+      ctx.stroke();
+    }
+
+    ringRot1 += 0.006;
+    ringRot2 -= 0.004;
+    drawRing(baseR * 0.88, ringRot1, 0.34, `rgba(210,212,220,${0.55 * alpha})`, [18, 9, 4, 9], 3.2 * alpha);
+    drawRing(baseR * 0.98, ringRot2, 0.55, `rgba(220,222,230,${0.45 * alpha})`, [24, 7], 2.6 * alpha);
+
+    sageRotX += 0.12 * dt;
+    sageRotY += 0.18 * dt;
+    sageRotZ += 0.07 * dt;
+    const wireDist = 3;
+    const wireScale = nucleusR * 2.4;
+    const wireProj = ICO_VERTS.map((v) => {
+      const [px, py] = project(rotatePoint(v, sageRotX, sageRotY, sageRotZ), wireDist);
+      return [px * wireScale, py * wireScale];
+    });
+    ctx.strokeStyle = `rgba(255,255,255,${0.55 * alpha})`;
+    ctx.lineWidth = 1.1;
+    for (const [a, b] of ICO_EDGES) {
+      ctx.beginPath();
+      ctx.moveTo(wireProj[a][0], wireProj[a][1]);
+      ctx.lineTo(wireProj[b][0], wireProj[b][1]);
+      ctx.stroke();
+    }
+
+    if (Math.random() < 0.14) spawnSageParticle();
+    for (let i = sageParticles.length - 1; i >= 0; i--) {
+      const p = sageParticles[i];
+      p.r += p.speed;
+      p.life -= p.decay;
+      if (p.life <= 0 || p.r > baseR * 2.3) { sageParticles.splice(i, 1); continue; }
+      const x = Math.cos(p.angle) * p.r, y = Math.sin(p.angle) * p.r;
+      ctx.fillStyle = `rgba(230,232,238,${p.life * 0.7 * alpha})`;
+      ctx.beginPath();
+      ctx.arc(x, y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const glowR = nucleusR * 2.1;
+    const grad2 = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+    grad2.addColorStop(0, `rgba(255,255,255,${0.85 * alpha})`);
+    grad2.addColorStop(0.25, `rgba(230,232,238,${0.45 * alpha})`);
+    grad2.addColorStop(1, 'rgba(230,232,238,0)');
+    ctx.fillStyle = grad2;
+    ctx.beginPath();
+    ctx.arc(0, 0, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function draw(dt) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, W, H);
+    if (!graph) return;
+
+    t += dt;
+
+    if (hand) { lastCursorX = hand.x * W - CX; lastCursorY = hand.y * H - CY; }
+    const cursorX = lastCursorX, cursorY = lastCursorY;
+
+    if (hand && hand.fist && !prevFist && (t - lastViewSwitchT) > VIEW_SWITCH_COOLDOWN_S) {
+      advanceView();
+      lastViewSwitchT = t;
+    }
+    prevFist = !!(hand && hand.fist);
+
+    let rotAngle;
+    if (grabbedNodeIndex !== null) {
+      rotAngle = frozenAngle;
+    } else if (hand && hand.mode === 'rotate') {
+      rotAngle = hand.ry;
+      rotY = rotAngle;
+    } else {
+      rotY += dt * IDLE_ROT_SPEED;
+      rotAngle = rotY;
+    }
+
+    const vignette = ctx.createRadialGradient(CX, CY, 0, CX, CY, Math.max(W, H) * 0.62);
+    vignette.addColorStop(0, 'rgba(4,4,7,0.55)');
+    vignette.addColorStop(0.45, 'rgba(3,3,6,0.78)');
+    vignette.addColorStop(1, 'rgba(2,2,4,0.94)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
+    ctx.translate(CX, CY);
+
+    const coreScale = smoothstep((t - graphT0) / RISE_DURATION);
+
+    if (hand && hand.pinch && grabbedNodeIndex === null && lastProj) {
+      let bestI = -1, bestD = Infinity;
+      for (let i = 0; i < graph.nodes.length; i++) {
+        if (graph.nodes[i].scale <= 0.05) continue;
+        const p = lastProj[i];
+        const d = Math.hypot(p.x - cursorX, p.y - cursorY);
+        const pickR = i === 0 ? CORE_BASE_R * coreScale * 0.9 : PICK_RADIUS;
+        if (d < pickR && d < bestD) { bestD = d; bestI = i; }
+      }
+      if (bestI !== -1) {
+        grabbedNodeIndex = bestI;
+        frozenAngle = rotAngle;
+      }
+    }
+
+    if (grabbedNodeIndex !== null) {
+      if (hand && hand.pinch) {
+        const [bx, by] = rotate2D(cursorX, cursorY, -frozenAngle);
+        graph.nodes[grabbedNodeIndex].base = [bx, by, 0];
+        graph.nodes[grabbedNodeIndex].vx = 0;
+        graph.nodes[grabbedNodeIndex].vy = 0;
+      } else {
+        grabbedNodeIndex = null;
+        frozenAngle = null;
+      }
+    }
+
+    stepPhysics(dt);
+
+    const proj = graph.nodes.map((n) => {
+      const rise = smoothstep((t - graphT0 - n.revealAt) / RISE_DURATION);
+      n.scale = rise;
+      const [px, py] = rotate2D(n.base[0], n.base[1], rotAngle);
+      return { x: px, y: py, f: 1, z: 0 };
+    });
+
+    if (!renderPos || renderPos.length !== graph.nodes.length) {
+      renderPos = proj.map((p) => ({ x: p.x, y: p.y, vx: 0, vy: 0 }));
+    }
+    for (let i = 0; i < graph.nodes.length; i++) {
+      if (i === grabbedNodeIndex) {
+        renderPos[i].x = proj[i].x; renderPos[i].y = proj[i].y;
+        renderPos[i].vx = 0; renderPos[i].vy = 0;
+        continue;
+      }
+      const rp = renderPos[i];
+      const fax = (proj[i].x - rp.x) * FOLLOW_STIFFNESS - rp.vx * FOLLOW_DAMPING;
+      const fay = (proj[i].y - rp.y) * FOLLOW_STIFFNESS - rp.vy * FOLLOW_DAMPING;
+      rp.vx += fax * dt; rp.vy += fay * dt;
+      rp.x += rp.vx * dt; rp.y += rp.vy * dt;
+      proj[i].x = rp.x; proj[i].y = rp.y;
+    }
+    lastProj = proj;
+
+    ctx.save();
+    ctx.translate(proj[0].x, proj[0].y);
+    drawGreatSageCore(dt, coreScale);
+    ctx.restore();
+
+    const items = [];
+    graph.links.forEach((l, i) => {
+      const za = proj[l.a].z, zb = proj[l.b].z;
+      items.push({ type: 'link', i, z: (za + zb) / 2 });
+    });
+    graph.nodes.forEach((n, i) => {
+      if (i === 0) return;
+      items.push({ type: 'node', i, z: proj[i].z });
+    });
+    items.sort((a, b) => a.z - b.z);
+
+    for (const item of items) {
+      if (item.type === 'link') {
+        ctx.globalCompositeOperation = 'source-over';
+        const l = graph.links[item.i];
+        const a = proj[l.a], b = proj[l.b];
+        const sa = graph.nodes[l.a].scale, sb = graph.nodes[l.b].scale;
+        const s = Math.min(sa, sb);
+        if (s <= 0.01) continue;
+        const fAvg = (a.f + b.f) / 2;
+        ctx.strokeStyle = `rgba(210,213,219,${0.32 * s * Math.min(1.3, fAvg)})`;
+        ctx.lineWidth = 1.2 * Math.min(1.2, fAvg);
+
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const bendNow = l.bend + Math.sin(t * 0.35 + l.phase) * 0.03;
+        const cx = mx + dy * bendNow;
+        const cy = my - dx * bendNow;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.quadraticCurveTo(cx, cy, b.x, b.y);
+        ctx.stroke();
+      } else {
+        const n = graph.nodes[item.i];
+        const p = proj[item.i];
+        if (n.scale <= 0.01) continue;
+        const [r, g, b] = KIND_COLOR[n.kind] || [255, 255, 255];
+        const rad = n.r0 * Math.max(0.05, p.f) * n.scale;
+
+        ctx.globalCompositeOperation = 'lighter';
+        const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad * 2.4);
+        halo.addColorStop(0, `rgba(255,255,255,${0.22 * n.scale})`);
+        halo.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rad * 2.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = `rgba(${r},${g},${b},${0.62 * n.scale})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rad, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (n.scale > 0.4) {
+          const isBright = n.kind === 'package' || n.kind === 'kfolder' || n.kind === 'integration';
+          ctx.font = isBright ? '10px sans-serif' : '9px sans-serif';
+          ctx.fillStyle = isBright
+            ? `rgba(255,255,255,${0.6 * n.scale})`
+            : `rgba(214,217,224,${0.5 * n.scale})`;
+          ctx.textAlign = 'center';
+          ctx.fillText(n.label, p.x, p.y - rad - 6);
+        }
+      }
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    if (coreScale > 0.01) {
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillStyle = `rgba(255,255,255,${0.65 * coreScale})`;
+      ctx.textAlign = 'center';
+      ctx.fillText(graph.nodes[0].label, proj[0].x, proj[0].y + CORE_BASE_R * coreScale + 18);
+    }
+
+    ctx.restore();
+
+    drawHandOverlay(hand);
+  }
+
+  const HAND_CONNECTIONS = [
+    [0, 1], [1, 2], [2, 3], [3, 4],
+    [0, 5], [5, 6], [6, 7], [7, 8],
+    [5, 9], [9, 10], [10, 11], [11, 12],
+    [9, 13], [13, 14], [14, 15], [15, 16],
+    [13, 17], [17, 18], [18, 19], [19, 20],
+    [0, 17],
+  ];
+
+  function drawHandOverlay(h) {
+    if (!h) return;
+    const [cr, cg, cb] = h.mode === 'rotate' ? [150, 200, 255] : (h.pinch ? [255, 200, 120] : [190, 255, 230]);
+    const pts = h.landmarks.map(([x, y]) => [x * W, y * H]);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${h.pinch || h.mode === 'rotate' ? 0.85 : 0.55})`;
+    ctx.lineWidth = h.pinch || h.mode === 'rotate' ? 2.2 : 1.4;
+    for (const [a, b] of HAND_CONNECTIONS) {
+      ctx.beginPath();
+      ctx.moveTo(pts[a][0], pts[a][1]);
+      ctx.lineTo(pts[b][0], pts[b][1]);
+      ctx.stroke();
+    }
+
+    for (const [x, y] of pts) {
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, 8);
+      glow.addColorStop(0, `rgba(${cr},${cg},${cb},0.9)`);
+      glow.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(x, y, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const px = h.x * W, py = h.y * H;
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.9)`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(px, py, grabbedNodeIndex !== null ? 10 : 14, 0, Math.PI * 2);
+    ctx.stroke();
+    if (grabbedNodeIndex !== null) {
+      ctx.fillStyle = `rgba(${cr},${cg},${cb},0.35)`;
+      ctx.beginPath();
+      ctx.arc(px, py, 10, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    draw(dt);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

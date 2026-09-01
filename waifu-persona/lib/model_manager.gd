@@ -1,0 +1,150 @@
+extends Node
+
+const Files = preload("res://lib/utils/files.gd")
+const ModelMeta = preload("res://lib/model/metadata.gd")
+const VtModel = preload("res://lib/model/vt_model.gd")
+const TrackingSystem = preload("res://lib/tracking/tracking_system.gd")
+
+const FILE_DIR = "user://Live2DModels"
+
+var model_cache: Dictionary = {}
+signal list_updated(models: Array)
+
+func _ready() -> void:
+	refresh_models.call_deferred()
+	add_to_group("system:model")
+	
+const GLTF_EXTENSIONS = [".vrm", ".glb", ".gltf"]
+
+func _is_gltf_file(f: String) -> bool:
+	for ext in GLTF_EXTENSIONS:
+		if f.ends_with(ext):
+			return true
+	return false
+
+func load_data(path: String) -> ModelMeta:
+	if _is_gltf_file(path):
+		return _load_data_gltf(path)
+
+	var vt_file = ""
+	var files = Array(DirAccess.get_files_at(path))
+	for f in files:
+		if f.ends_with("vtube.json"):
+			vt_file = path.path_join(f)
+			break
+
+	if vt_file.is_empty():
+		for f in files:
+			if _is_gltf_file(f):
+				return _load_data_gltf(path.path_join(f))
+		return null
+
+	return _load_data_l2d(path, vt_file)
+
+## a glTF/VRM avatar is fully self-contained in one file — no vtube.json-equivalent
+## manifest to read, so most ModelMeta fields are left empty (see vt_model.gd's
+## format == "gltf" guards around the vtube.json-specific save/load paths).
+func _load_data_gltf(model_path: String) -> ModelMeta:
+	var meta = ModelMeta.new()
+	var base_name = model_path.get_file().get_basename()
+
+	meta.name = base_name
+	meta.path = model_path.get_base_dir()
+	meta.id = "gltf:%d" % model_path.hash()
+	meta.model = model_path
+	meta.format = "gltf"
+	meta.studio_parameters = ""
+	meta.openvt_parameters = "%s/%s.ovt.json" % [model_path.get_base_dir(), base_name]
+	meta.model_parameters = ""
+	meta.physics = ""
+	meta.icon = ""
+	meta.last_updated = Time.get_unix_time_from_system()
+
+	return meta
+
+func _load_data_l2d(path: String, vt_file: String) -> ModelMeta:
+	var vtube_data = Files.read_json(vt_file)
+	var vt_file_refs = vtube_data.get("FileReferences", {})
+	
+	var model_data = Files.read_json(vt_file.get_base_dir().path_join(vt_file_refs.get("Model", "")))
+		
+	var meta = ModelMeta.new()
+	var base_name = vt_file.get_file()
+	var ext = base_name.find(".")
+	base_name = base_name.left(ext)
+	meta.name = vtube_data["Name"]
+	meta.path = path
+	meta.id = vtube_data["ModelID"]
+	meta.model = vt_file.get_base_dir().path_join(vtube_data["FileReferences"]["Model"])
+	meta.format = "l2d"
+	meta.studio_parameters = vt_file
+	meta.openvt_parameters = "%s/%s.ovt.json" % [meta.model.get_base_dir(), base_name]
+	meta.last_updated = String(vtube_data.get("ModelSaveMetadata", {}).get("LastSavedDateUnixMillisecondTimestamp", "0")).to_int() / 1000.0
+	
+	var file_refs = model_data.get("FileReferences", {})
+	meta.model_parameters = vt_file.get_base_dir().path_join(file_refs["DisplayInfo"])
+	meta.physics = "" if file_refs.get("Physics", "").is_empty() else vt_file.get_base_dir().path_join(file_refs["Physics"])
+	
+	meta.icon = "" if vt_file_refs.get("Icon", "").is_empty() else vt_file.get_base_dir().path_join(vt_file_refs["Icon"])
+	
+	return meta
+	
+func refresh_models():
+	if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path(FILE_DIR)):
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(FILE_DIR))
+	
+	var model_folders = DirAccess.get_directories_at(FILE_DIR)
+	model_cache = {}
+	for i in model_folders:
+		var fp = FILE_DIR.path_join(i)
+		var meta = load_data(fp)
+		if meta:
+			model_cache[meta.id] = meta
+
+	# glTF/VRM avatars are a single self-contained file — support dropping them
+	# loose into the models directory too, no subfolder required.
+	for i in DirAccess.get_files_at(FILE_DIR):
+		if _is_gltf_file(i):
+			var meta = load_data(FILE_DIR.path_join(i))
+			if meta:
+				model_cache[meta.id] = meta
+
+	var models = model_cache.values()
+	list_updated.emit(models)
+	
+	return models
+
+func make_model(model):
+	var data
+	if model in model_cache:
+		data = model_cache[model]
+	else:
+		data = load_data(model)
+				
+	if data == null:
+		return
+	
+	var new_model: VtModel = preload("res://lib/model/vt_model.tscn").instantiate()
+	match data.format:
+		"l2d":
+			var strategy = preload("res://lib/model/formats/l2d/model_strategy.gd").new()
+			new_model.format_strategy = strategy
+			new_model.model = data
+			strategy.name = "FormatStrategy"
+			new_model.add_child(strategy)
+			new_model.render = strategy
+		"gltf":
+			var strategy = preload("res://lib/model/formats/gltf/model_strategy.gd").new()
+			new_model.format_strategy = strategy
+			new_model.model = data
+			strategy.name = "FormatStrategy"
+			new_model.add_child(strategy)
+			new_model.render = strategy
+	
+	var tracking: TrackingSystem = get_tree().get_first_node_in_group("system:tracking")
+	tracking.parameters_updated.connect(new_model.tracking_updated)
+	
+	new_model.display_name = data.name
+	
+	return new_model
+	

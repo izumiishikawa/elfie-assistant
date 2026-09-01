@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3 uid="uid://drt0184vymus2"]
+
+[ext_resource type="Script" path="res://addons/gd_cubism/example/demo_effect_custom_02.gd" id="1_oi5ow"]
+[ext_resource type="Texture2D" uid="uid://c8o4yd28cp3jy" path="res://icon.svg" id="2_0d7x8"]
+
+[node name="demo_effect_custom_02" type="Node2D"]
+script = ExtResource("1_oi5ow")
+
+[node name="GDCubismUserModel" type="GDCubismUserModel" parent="."]
+
+[node name="GDCubismEffectCustom" type="GDCubismEffectCustom" parent="GDCubismUserModel"]
+
+[node name="Sprite2D" type="Sprite2D" parent="GDCubismUserModel/GDCubismEffectCustom"]
+z_index = 1024
+scale = Vector2(0.5, 0.5)
+texture = ExtResource("2_0d7x8")

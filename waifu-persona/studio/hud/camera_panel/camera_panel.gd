@@ -1,0 +1,137 @@
+extends "res://studio/hud/side_panel.gd"
+
+const Tracker = preload("res://lib/tracking/tracker.gd")
+const TrackingSystem = preload("res://lib/tracking/tracking_system.gd")
+
+signal update_bg_color(color: Color)
+
+@onready var tracking_system: TrackingSystem = get_tree().get_first_node_in_group("system:tracking")
+@onready var transparency_toggle: CheckButton = %TransparencyToggle
+@onready var mic_toggle: CheckButton = %MicrophoneToggle
+@onready var face_trackers: OptionButton = %TrackingSource
+@onready var fps_option: OptionButton = %FPS
+
+@onready var parameter_list = %ParameterList
+
+func _get_title():
+	return "Settings"
+
+func _ready() -> void:
+	if OS.has_feature("openseeface") or OS.is_debug_build():
+		face_trackers.add_item("OpenSeeFace (Webcam)")
+		face_trackers.set_item_metadata(face_trackers.item_count - 1, preload("res://lib/tracking/camera/openseeface/osf_tracker.gd"))
+	
+	face_trackers.add_item("VTubeStudio (iOS/Android)")
+	face_trackers.set_item_metadata(face_trackers.item_count - 1, preload("res://lib/tracking/camera/vts/vts_tracker.gd"))
+	
+	for tracker in tracking_system.get_children():
+		var config = tracker.create_config()
+		if config != null:
+			%Tracking.add_child(config)
+	
+	Registry.parameter_list_changed.connect(
+		func ():
+			for c in parameter_list.get_children():
+				c.free()
+			
+			for i in Registry.parameters():
+				var box = HBoxContainer.new()
+				var l = Label.new()
+				l.text = i.id
+				l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				box.add_child(l)
+				var v = Label.new()
+				v.name = "Value"
+				box.add_child(v)
+				box.name = i.id
+				parameter_list.add_child.call_deferred(box)
+	)
+		
+	if tracking_system:
+		tracking_system.tracker_changed.connect(_on_tracker_system_tracker_changed)
+		tracking_system.parameters_updated.connect(_on_tracker_system_parameters_updated)
+		face_trackers.item_selected.connect(
+			func (idx):
+				var _tracker = face_trackers.get_item_metadata(idx)
+				tracking_system.activate_tracker(_tracker.new())
+		)
+		
+	if OS.has_feature("linux"):
+		CameraServer.set_monitoring_feeds(true)
+		await get_tree().process_frame
+		var feeds = CameraServer.feeds()
+		for i in feeds:
+			var id = i.get_id()
+			var name = i.get_name()
+			%VirtualWebcam/Value.add_item(i.get_name(), i.get_id() + 1)
+		if len(feeds) > 0:
+			%VirtualWebcam/Value.select(0)
+		var vp = get_tree().get_first_node_in_group("system:stage").capture_viewport
+		%VirtualWebcam/V4l2OutputStream.viewport = vp
+	else:
+		%VirtualWebcam.queue_free()
+
+func _on_tracker_system_tracker_changed(new_tracker: Tracker) -> void:
+	var config = Control.new()
+	if new_tracker != null:
+		config = new_tracker.create_config()
+	config.name = "Config"
+	
+	%FaceTracking/Config.queue_free()
+	await get_tree().process_frame
+	%FaceTracking.add_child(config)
+
+func _on_tracker_system_parameters_updated(parameters: Dictionary, _delta) -> void:
+	if !is_node_ready():
+		return
+	for p in Registry.parameters():
+		var node = parameter_list.get_node(NodePath(p.id))
+		if node == null:
+			continue
+		node.get_node("Value").text = "%.02f" % parameters.get(p.id, 0)
+
+func _on_preview_background_color_color_changed(color: Color) -> void:
+	update_bg_color.emit(color)
+
+func _on_transparency_toggle_toggled(toggled_on: bool) -> void:
+	get_tree().get_first_node_in_group("system:stage").toggle_bg(toggled_on)
+
+func load_settings(data: Dictionary):
+	transparency_toggle.button_pressed = data.get("window", {}).get("transparent", false)
+	face_trackers.select(data.get("camera", {}).get("tracking", 0))
+	fps_option.select(data.get("window", {}).get("fps", 0))
+	_on_fps_value_item_selected(fps_option.get_selected_id())
+	if tracking_system:
+		tracking_system.activate_tracker(
+			face_trackers.get_selected_metadata().new()
+		)
+		mic_toggle.button_pressed = data.get("microphone", true)
+	
+func save_settings(data: Dictionary):
+	var w = data.get("window", {})
+	w["transparent"] = transparency_toggle.button_pressed
+	w["fps"] = fps_option.get_selected_id()
+	var c = data.get("camera", {})
+	c["tracking"] = face_trackers.get_selected_id()
+	data["window"] = w
+	data["camera"] = c
+	data["microphone"] = mic_toggle.button_pressed
+
+func _on_fps_value_item_selected(index: int) -> void:
+	match index:
+		0: # 60 FPS
+			Engine.max_fps = 60
+		1: # 30 FPS
+			Engine.max_fps = 30
+		_: # Uncapped
+			Engine.max_fps = 0
+
+func _on_microphone_toggle_toggled(toggled_on: bool) -> void:
+	if not tracking_system:
+		return
+	tracking_system.get_node("MicrophoneTracker").enabled = toggled_on
+
+func _on_loopback_item_selected(index: int) -> void:
+	var device_id = %VirtualWebcam/Value.get_item_id(index)
+	print("selected /dev/video%d" % device_id)
+	%VirtualWebcam/V4l2OutputStream.set_loopback_device("/dev/video%d" % [device_id])

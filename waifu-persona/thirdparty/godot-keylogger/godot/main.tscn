@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3 uid="uid://1netgite4ki3"]
+
+[sub_resource type="GDScript" id="GDScript_4nulg"]
+script/source = "extends Node
+
+func _process(_delta):
+	if GlobalInput.is_key_just_pressed(KEY_A):
+		print(\"hello casey\")
+	elif Input.is_key_pressed(KEY_A):
+		print(\"hello alice\")
+	elif GlobalInput.is_key_pressed(KEY_A):
+		print(\"hello bob\")
+"
+
+[node name="Node" type="Node"]
+script = SubResource("GDScript_4nulg")

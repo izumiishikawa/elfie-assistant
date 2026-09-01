@@ -1,0 +1,91 @@
+diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioStream.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioStream.kt
+index 8ecdcc1..6de87d4 100644
+--- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioStream.kt
++++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioStream.kt
+@@ -4,6 +4,8 @@ import android.Manifest
+ import android.media.AudioFormat
+ import android.media.AudioRecord
+ import android.media.MediaRecorder
++import android.media.audiofx.AcousticEchoCanceler
++import android.media.audiofx.NoiseSuppressor
+ import androidx.annotation.RequiresPermission
+ import expo.modules.kotlin.AppContext
+ import expo.modules.kotlin.jni.NativeArrayBuffer
+@@ -41,6 +43,8 @@ class AudioStream(
+   private var audioRecord: AudioRecord? = null
+   private var captureJob: Job? = null
+   private val coroutineScope = CoroutineScope(Dispatchers.IO)
++  private var echoCanceler: AcousticEchoCanceler? = null
++  private var noiseSuppressor: NoiseSuppressor? = null
+ 
+   var sampleRate: Int = 0
+     private set
+@@ -74,6 +78,7 @@ class AudioStream(
+     audioRecord = recorder
+     startTimeNanos = System.nanoTime()
+     isStreaming = true
++    attachVoiceEffects(recorder.audioSessionId)
+     emitStatus()
+ 
+     startCaptureLoop(recorder, config)
+@@ -84,12 +89,29 @@ class AudioStream(
+     isStreaming = false
+     captureJob?.cancel()
+     captureJob = null
++    echoCanceler?.release()
++    echoCanceler = null
++    noiseSuppressor?.release()
++    noiseSuppressor = null
+     audioRecord?.stop()
+     audioRecord?.release()
+     audioRecord = null
+     emitStatus()
+   }
+ 
++  // Without this, AudioSource.VOICE_COMMUNICATION below still picks up the device's own
++  // speaker output on speakerphone (no AEC applied), so the mic re-captures Elfie's own
++  // TTS playback as if it were the user talking, transcribes it, and sends it back to her
++  // as a message — an infinite "listening to herself" loop during calls.
++  private fun attachVoiceEffects(audioSessionId: Int) {
++    if (AcousticEchoCanceler.isAvailable()) {
++      echoCanceler = AcousticEchoCanceler.create(audioSessionId)?.apply { enabled = true }
++    }
++    if (NoiseSuppressor.isAvailable()) {
++      noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.apply { enabled = true }
++    }
++  }
++
+   private fun resolveAudioConfig(): ResolvedAudioConfig {
+     val channelConfig = if (options.channels == 2) {
+       AudioFormat.CHANNEL_IN_STEREO
+@@ -139,7 +161,7 @@ class AudioStream(
+   @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+   private fun createAudioRecord(config: ResolvedAudioConfig): AudioRecord {
+     val recorder = AudioRecord(
+-      MediaRecorder.AudioSource.MIC,
++      MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+       config.sampleRate,
+       config.channelConfig,
+       config.audioEncoding,
+diff --git a/node_modules/expo-audio/ios/AudioStream.swift b/node_modules/expo-audio/ios/AudioStream.swift
+index f938eff..1000ecb 100644
+--- a/node_modules/expo-audio/ios/AudioStream.swift
++++ b/node_modules/expo-audio/ios/AudioStream.swift
+@@ -30,12 +30,16 @@ class AudioStream: SharedObject {
+     guard !isStreaming else { return }
+ 
+     let session = AVAudioSession.sharedInstance()
+-    try session.setCategory(.record, mode: .measurement)
++    try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker])
+     try session.setPreferredSampleRate(requestedSampleRate)
+     try session.setActive(true)
+ 
+     let engine = AVAudioEngine()
+     let inputNode = engine.inputNode
++    // Enables the system's built-in acoustic echo cancellation (voice-processing I/O unit).
++    // Without it, on speakerphone the mic re-captures whatever this app is playing back
++    // through the same session (e.g. TTS audio) as if it were the user speaking.
++    try? inputNode.setVoiceProcessingEnabled(true)
+     let hardwareFormat = inputNode.outputFormat(forBus: 0)
+ 
+     let targetSampleRate = requestedSampleRate

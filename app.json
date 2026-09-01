@@ -1,0 +1,83 @@
+{
+  "expo": {
+    "name": "Elfie",
+    "slug": "elfie",
+    "version": "1.0.3",
+    "orientation": "portrait",
+    "icon": "./assets/playstore.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mooncoded.elfie"
+    },
+    "android": {
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/playstore.png",
+        "backgroundColor": "#13131f"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.mooncoded.elfie",
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/1d7d0b6d-212e-4dac-a8b5-5b4fa02f484b",
+      "checkAutomatically": "NEVER"
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "plugins": [
+      "expo-image",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permite escolher uma foto de perfil."
+        }
+      ],
+      "expo-updates",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/playstore.png",
+          "color": "#996dff",
+          "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-audio",
+      "expo-video",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Permite salvar imagens na sua galeria.",
+          "savePhotosPermission": "Permite salvar imagens na sua galeria.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
+    "extra": {
+      "apiUrl": "http://192.168.100.56:3000",
+      "eas": {
+        "projectId": "1d7d0b6d-212e-4dac-a8b5-5b4fa02f484b"
+      }
+    },
+    "owner": "mooncoded"
+  }
+}

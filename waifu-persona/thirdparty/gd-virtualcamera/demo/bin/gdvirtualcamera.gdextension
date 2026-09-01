@@ -1,0 +1,10 @@
+[configuration]
+
+entry_symbol = "gdvirtualcamera_library_init"
+compatibility_minimum = "4.4"
+
+[libraries]
+linux.x86_64.single.debug = "res://addons/gd-virtualcamera/linux/libgd-virtualcamera.linux.template_debug.x86_64.so"
+linux.x86_64.double.debug = "res://addons/gd-virtualcamera/linux/libgd-virtualcamera.linux.template_debug.x86_64.double.so"
+linux.x86_64.single.release = "res://addons/gd-virtualcamera/linux/libgd-virtualcamera.linux.template_release.x86_64.so"
+linux.x86_64.double.release = "res://addons/gd-virtualcamera/linux/libgd-virtualcamera.linux.template_release.x86_64.double.so"

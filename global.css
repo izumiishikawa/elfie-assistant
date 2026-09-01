@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Background / Surface */
+    --background: #17171c;
+    --foreground: #1e1e25;
+
+    /* Card */
+    --card: 240 10% 7%;
+    --card-foreground: 240 5% 96%;
+
+    /* Primary — violet */
+    --primary: 265 89% 68%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary — muted violet */
+    --secondary: 265 30% 16%;
+    --secondary-foreground: 265 20% 80%;
+
+    /* Accent — soft purple glow */
+    --accent: 280 75% 72%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Muted */
+    --muted: 240 8% 12%;
+    --muted-foreground: 240 5% 55%;
+
+    /* Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Border / Ring */
+    --border: 240 8% 14%;
+    --ring: 265 89% 68%;
+  }
+}

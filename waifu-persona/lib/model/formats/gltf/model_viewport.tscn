@@ -1,0 +1,35 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://lib/model/formats/gltf/model_viewport.gd" id="1_gltfvp"]
+
+[sub_resource type="Environment" id="Environment_gltfvp"]
+background_mode = 0
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+ambient_light_energy = 0.9
+tonemap_mode = 2
+
+[node name="ModelViewport" type="SubViewportContainer"]
+stretch = false
+script = ExtResource("1_gltfvp")
+
+[node name="SubViewport" type="SubViewport" parent="."]
+transparent_bg = true
+handle_input_locally = false
+msaa_3d = 1
+size = Vector2i(600, 900)
+render_target_update_mode = 4
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="SubViewport"]
+environment = SubResource("Environment_gltfvp")
+
+[node name="RootAnchor" type="Node3D" parent="SubViewport"]
+
+[node name="Camera3D" type="Camera3D" parent="SubViewport"]
+current = true
+fov = 25.0
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="SubViewport"]
+transform = Transform3D(0.8137977, -0.4131759, 0.4067366, 0.0, 0.7009093, 0.7132504, -0.5811541, -0.5802046, 0.5703015, 0, 1.6, 1.2)
+light_energy = 1.1
+shadow_enabled = false

@@ -1,0 +1,18 @@
+export const colors = {
+  background: "hsl(240, 10%, 4%)",
+  foreground: "hsl(240, 5%, 96%)",
+  card: "hsl(240, 10%, 7%)",
+  cardForeground: "hsl(240, 5%, 96%)",
+  primary: "hsl(265, 89%, 68%)",
+  primaryForeground: "hsl(0, 0%, 100%)",
+  secondary: "hsl(265, 30%, 16%)",
+  secondaryForeground: "hsl(265, 20%, 80%)",
+  accent: "hsl(280, 75%, 72%)",
+  accentForeground: "hsl(0, 0%, 100%)",
+  muted: "hsl(240, 8%, 12%)",
+  mutedForeground: "hsl(240, 5%, 55%)",
+  destructive: "hsl(0, 72%, 51%)",
+  destructiveForeground: "hsl(0, 0%, 100%)",
+  border: "hsl(240, 8%, 14%)",
+  ring: "hsl(265, 89%, 68%)",
+} as const;

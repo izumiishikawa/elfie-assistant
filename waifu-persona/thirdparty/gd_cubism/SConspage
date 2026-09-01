@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2023 MizunagiKB <mizukb@live.jp>
+import os
+import glob
+
+
+env = Environment(ENV={"PATH": os.environ["PATH"]})
+
+
+def collect_page():
+    for src_pathname in glob.glob("./demo/addons/gd_cubism/res/shader/*.gdshader"):
+        _, filename = os.path.split(src_pathname)
+        env.Command(
+            source=src_pathname,
+            target=os.path.join("./docs-src/modules/ROOT/examples", filename),
+            action=[Copy("$TARGET", "$SOURCE")],
+        )
+
+    env.Command(
+        source="./LICENSE.adoc",
+        target="./docs-src/modules/ROOT/pages/ja/license.adoc",
+        action=[Copy("$TARGET", "$SOURCE")],
+    )
+
+    env.Command(
+        source="./LICENSE.en.adoc",
+        target="./docs-src/modules/ROOT/pages/en/license.adoc",
+        action=[Copy("$TARGET", "$SOURCE")],
+    )
+
+
+def build():
+    env.Command(target="DUMMY", source=None, action=[Delete("./docs")])
+    env.Command(
+        source="./docs-site/antora-playbook.yml",
+        target="./docs",
+        action=["npx antora --fetch $SOURCE"],
+    )
+    env.Command(target="./docs/.nojekyll", source=None, action="touch ./docs/.nojekyll")
+
+
+collect_page()
+build()

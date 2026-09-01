@@ -1,0 +1,5 @@
+numpy
+requests
+evdev
+Pillow
+webrtcvad

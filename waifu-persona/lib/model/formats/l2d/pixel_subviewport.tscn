@@ -1,0 +1,13 @@
+[gd_scene format=3 uid="uid://cn4jgqix6fdjx"]
+
+[ext_resource type="Script" uid="uid://do0upgvngngpa" path="res://lib/model/formats/l2d/pixel_subviewport.gd" id="1_owxwl"]
+
+[node name="PixelSubviewport" type="SubViewportContainer" unique_id=872051333]
+texture_filter = 2
+script = ExtResource("1_owxwl")
+
+[node name="SubViewport" type="SubViewport" parent="." unique_id=768433399]
+transparent_bg = true
+handle_input_locally = false
+size = Vector2i(2, 2)
+render_target_update_mode = 4
