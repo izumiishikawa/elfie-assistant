@@ -35,6 +35,19 @@ except ImportError:
 CONFIG_PATH = Path.home() / '.config' / 'elfie' / 'daemon.json'
 SOCK_PATH   = '/tmp/elfie.sock'
 PID_PATH    = '/tmp/elfie.pid'
+MAX_SELECTED_TEXT_CHARS = 6000
+
+
+def _get_selected_text() -> str:
+    for cmd in (['wl-paste', '--primary', '--no-newline'], ['xsel', '--primary']):
+        try:
+            out = subprocess.run(cmd, capture_output=True, timeout=0.5).stdout
+        except Exception:
+            continue
+        text = out.decode('utf-8', errors='ignore').strip()
+        if text:
+            return text[:MAX_SELECTED_TEXT_CHARS]
+    return ''
 
 
 def _ensure_single_instance():
@@ -78,7 +91,8 @@ SILENCE_MS    = 700
 MIN_DUR_MS    = 700;  MIN_BYTES  = 4000
 PRE_ROLL_MS   = 300
 
-VAD_AGGRESSIVENESS = 2
+VAD_AGGRESSIVENESS = 3
+AMBIENT_EMA_ALPHA   = 0.001
 
 _FFT_N  = BLOCK_SIZE * 2
 _BIN_HZ = SAMPLE_RATE / _FFT_N
@@ -329,6 +343,45 @@ class ElfieDaemon:
             print(f'\n[subtitle] _send_subtitle_to_overlay write FAILED: {ex}', flush=True)
             self._active_overlay_proc = None
 
+    def _send_kanji_to_overlay(self, ch: str):
+        proc = self._active_overlay_proc
+        if proc and proc.poll() is None:
+            try:
+                proc.stdin.write((json.dumps({'kanji': ch}) + '\n').encode())
+                proc.stdin.flush()
+            except Exception:
+                self._active_overlay_proc = None
+
+    _GREAT_SAGE_CUES = {
+        'warning': ('warning.mp3', '告'),
+        'ryo':     ('ryo.mp3', '了'),
+    }
+
+    def _great_sage_enabled(self) -> bool:
+        api = self.cfg.get('apiBase', 'http://localhost:3000')
+        try:
+            r = self._session.get(f'{api}/api/characters', timeout=3)
+            r.raise_for_status()
+            data = r.json()
+            active_id = str(data.get('activeCharacterId') or '')
+            for c in data.get('characters', []):
+                if str(c.get('_id')) == active_id:
+                    return bool(c.get('greatSageWarnings', True))
+            return True
+        except Exception:
+            return True
+
+    def _cue_great_sage(self, cue: str):
+        pair = self._GREAT_SAGE_CUES.get(cue)
+        if not pair:
+            return
+        if not self._great_sage_enabled():
+            return
+        filename, kanji = pair
+        self._ensure_active_overlay()
+        self._play_sfx(filename)
+        self._send_kanji_to_overlay(kanji)
+
     def _show_tool_activity(self, tool_name: str, detail: str = ''):
         proc = self._active_overlay_proc
         spawned_fresh = not proc or proc.poll() is not None
@@ -414,9 +467,10 @@ class ElfieDaemon:
 
     def _vad_loop(self):
         calib: list = []
-        start_thr = START_MIN
-        stop_thr  = STOP_MIN
-        
+        start_thr   = START_MIN
+        stop_thr    = STOP_MIN
+        ambient_ema = START_MIN
+
         vad_state     = 'idle'
         hold_start    = 0.0
         silence_start = 0.0
@@ -451,9 +505,10 @@ class ElfieDaemon:
             if len(calib) < CALIB_FRAMES:
                 calib.append(_speech_energy(block))
                 if len(calib) == CALIB_FRAMES:
-                    ambient   = sum(calib) / CALIB_FRAMES
-                    start_thr = max(START_MIN, ambient * START_MULT)
-                    stop_thr  = max(STOP_MIN,  ambient * STOP_MULT)
+                    ambient     = sum(calib) / CALIB_FRAMES
+                    ambient_ema = ambient
+                    start_thr   = max(START_MIN, ambient * START_MULT)
+                    stop_thr    = max(STOP_MIN,  ambient * STOP_MULT)
                     self._start_thr = start_thr
                     self._set_state('listening')
                 continue
@@ -473,6 +528,14 @@ class ElfieDaemon:
             now = time.monotonic()
 
             if vad_state == 'idle':
+                # acompanha o piso de ruído/música ambiente lentamente (só fora de fala
+                # detectada), pra não travar o threshold no que foi medido na calibração
+                # inicial e passar a marcar som ambiente constante como voz.
+                ambient_ema = ambient_ema * (1 - AMBIENT_EMA_ALPHA) + e * AMBIENT_EMA_ALPHA
+                start_thr   = max(START_MIN, ambient_ema * START_MULT)
+                stop_thr    = max(STOP_MIN,  ambient_ema * STOP_MULT)
+                self._start_thr = start_thr
+
                 ring_buffer.append(block)
                 if len(ring_buffer) > pre_roll_frames:
                     ring_buffer.pop(0)
@@ -557,8 +620,10 @@ class ElfieDaemon:
                 self._set_state('listening')
                 continue
 
+            selected_text = _get_selected_text()
+
             self._set_state('processing')
-            self._stream_voice(api, chat, transcript)
+            self._stream_voice(api, chat, transcript, selected_text)
 
     def _create_new_chat(self, api: str) -> str:
         r = self._session.post(f'{api}/api/chats', timeout=10)
@@ -590,6 +655,7 @@ class ElfieDaemon:
 
     def _process_voice_stream(self, r, api: str):
         buf = ''
+        tool_flow_started = False
         for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
             if self._stop.is_set():
                 break
@@ -607,6 +673,9 @@ class ElfieDaemon:
                 if ev_type == 'neuro_started':
                     self._play_sfx('neuro.mp3')
                 elif ev_type == 'tool_call' and ev.get('name'):
+                    if not tool_flow_started:
+                        tool_flow_started = True
+                        self._cue_great_sage('ryo')
                     if ev['name'] == 'web_search':
                         self._play_sfx('websearch.mp3')
                     self._show_tool_activity(ev['name'], ev.get('detail') or '')
@@ -639,11 +708,14 @@ class ElfieDaemon:
 
         self._clear_tool_activity()
 
-    def _stream_voice(self, api: str, chat_id: str, text: str):
+    def _stream_voice(self, api: str, chat_id: str, text: str, selected_text: str = ''):
+        payload = {'text': text}
+        if selected_text:
+            payload['selectedText'] = selected_text
         try:
             with self._session.post(
                 f'{api}/api/chats/{chat_id}/voice',
-                json={'text': text},
+                json=payload,
                 stream=True,
                 timeout=60,
             ) as r:
@@ -651,7 +723,7 @@ class ElfieDaemon:
                     chat_id = self._create_new_chat(api)
                     with self._session.post(
                         f'{api}/api/chats/{chat_id}/voice',
-                        json={'text': text},
+                        json=payload,
                         stream=True,
                         timeout=60,
                     ) as r2:
@@ -1369,6 +1441,13 @@ class ElfieDaemon:
 
         if action == 'hide_mind':
             self._close_mind_overlay()
+            return {'ok': True}
+
+        if action == 'great_sage_cue':
+            cue = cmd.get('cue', '').strip()
+            if cue not in self._GREAT_SAGE_CUES:
+                return {'error': f'cue desconhecida: {cue}'}
+            self._cue_great_sage(cue)
             return {'ok': True}
 
         if action == 'play_audio':

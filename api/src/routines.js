@@ -30,6 +30,8 @@ async function executeRoutine(routine) {
     return;
   }
 
+  sendToDaemon({ cmd: 'great_sage_cue', cue: 'warning' }).catch(() => {});
+
   const chat = await Chat.create({ characterId: char._id });
   const isFirstMessage = true;
   chat.messages.push({ role: 'user', content: routine.prompt, triggeredByRoutine: routine._id });

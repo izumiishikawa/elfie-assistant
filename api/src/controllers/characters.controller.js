@@ -45,9 +45,10 @@ export async function listCharacters(_req, res) {
 
 export async function createCharacter(req, res) {
   try {
-    const { name, personality, model, photoBase64, voiceId } = req.body;
+    const { name, personality, model, photoBase64, voiceId, greatSageWarnings } = req.body;
     const data = { name: name || 'Novo personagem', personality: personality || '', model: model || '' };
     if (voiceId !== undefined) data.voiceId = voiceId;
+    if (greatSageWarnings !== undefined) data.greatSageWarnings = !!greatSageWarnings;
     if (photoBase64) data.photo = await saveBase64(photoBase64);
 
     const character = await Character.create(data);
@@ -66,13 +67,14 @@ export async function createCharacter(req, res) {
 
 export async function updateCharacter(req, res) {
   try {
-    const { name, personality, model, photoBase64, voiceId, userName, userBasicData, longTermMemory } = req.body;
+    const { name, personality, model, photoBase64, voiceId, userName, userBasicData, longTermMemory, greatSageWarnings } = req.body;
     const patch = {};
     if (name !== undefined) patch.name = name;
     if (personality !== undefined) patch.personality = personality;
     if (model !== undefined) patch.model = model;
     if (photoBase64) patch.photo = await saveBase64(photoBase64);
     if (voiceId !== undefined) patch.voiceId = voiceId;
+    if (greatSageWarnings !== undefined) patch.greatSageWarnings = !!greatSageWarnings;
     if (userName !== undefined) patch.userName = userName;
     if (userBasicData !== undefined) patch.userBasicData = userBasicData;
     if (longTermMemory !== undefined) {

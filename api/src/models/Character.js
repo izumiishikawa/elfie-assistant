@@ -26,6 +26,7 @@ const characterSchema = new Schema(
     userBasicData: { type: String, default: '' },
     longTermMemory: { type: [memorySchema], default: [] },
     chatSummaries: { type: [summarySchema], default: [] },
+    greatSageWarnings: { type: Boolean, default: true },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

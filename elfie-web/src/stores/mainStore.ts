@@ -12,6 +12,7 @@ export interface Character {
   userName: string;
   userBasicData: string;
   longTermMemory: string[];
+  greatSageWarnings: boolean;
 }
 
 interface SettingsStore {

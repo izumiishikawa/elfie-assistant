@@ -79,6 +79,67 @@
     mode = STATE_BUCKET[name] || 'idle';
   };
 
+  let kanjiCue = null; // { char, t0 }
+  const KANJI_FORM_MS  = 550;
+  const KANJI_HOLD_MS  = 1400;
+  const KANJI_FADE_MS  = 450;
+  const KANJI_LAYERS   = 6;
+
+  window.showKanji = function (ch) {
+    const s = String(ch == null ? '' : ch).trim();
+    if (!s) return;
+    kanjiCue = { char: s.slice(0, 3), t0: performance.now() };
+  };
+
+  function drawKanjiCube(now) {
+    if (!kanjiCue) return;
+    const elapsed = now - kanjiCue.t0;
+    const total = KANJI_FORM_MS + KANJI_HOLD_MS + KANJI_FADE_MS;
+    if (elapsed > total) { kanjiCue = null; return; }
+
+    let formP = 1, boxAlpha = 1, charAlpha = 1;
+    if (elapsed < KANJI_FORM_MS) {
+      formP = elapsed / KANJI_FORM_MS;
+      charAlpha = Math.max(0, (formP - 0.55) / 0.45);
+    } else if (elapsed >= KANJI_FORM_MS + KANJI_HOLD_MS) {
+      const fp = (elapsed - KANJI_FORM_MS - KANJI_HOLD_MS) / KANJI_FADE_MS;
+      boxAlpha = 1 - fp;
+      charAlpha = 1 - fp;
+    }
+
+    const size = Math.min(W, H) * 0.17;
+    const layerH = size / KANJI_LAYERS;
+
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = boxAlpha;
+
+    ctx.fillStyle = 'rgba(4,5,9,0.94)';
+    ctx.strokeStyle = 'rgba(195,228,255,0.9)';
+    ctx.lineWidth = 2;
+
+    const layersShown = Math.ceil(formP * KANJI_LAYERS);
+    for (let i = 0; i < layersShown; i++) {
+      const layerP = Math.min(1, formP * KANJI_LAYERS - i);
+      const w = size * (0.25 + layerP * 0.75);
+      const y = -size / 2 + i * layerH;
+      ctx.fillRect(-w / 2, y, w, layerH + 0.6);
+    }
+    ctx.strokeRect(-size / 2, -size / 2, size, size * Math.min(1, formP * KANJI_LAYERS / KANJI_LAYERS));
+
+    if (charAlpha > 0.01) {
+      ctx.globalAlpha = boxAlpha * charAlpha;
+      ctx.fillStyle = '#f5f8ff';
+      ctx.font = `${Math.floor(size * 0.5)}px "Noto Sans JP", "Noto Sans CJK JP", sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(kanjiCue.char, 0, 0);
+    }
+
+    ctx.restore();
+  }
+
   const PHI = (1 + Math.sqrt(5)) / 2;
   const rawVerts = [
     [-1, PHI, 0], [1, PHI, 0], [-1, -PHI, 0], [1, -PHI, 0],
@@ -161,7 +222,7 @@
   let ringRot1 = 0, ringRot2 = Math.PI / 3;
   let modeScale = 1;
 
-  function draw(dt) {
+  function draw(dt, nowMs) {
     ctx.clearRect(0, 0, W, H);
     energy += (targetEnergy - energy) * 0.08;
 
@@ -246,13 +307,15 @@
     ctx.fill();
 
     ctx.restore();
+
+    drawKanjiCube(nowMs);
   }
 
   let last = performance.now();
   function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now; t += dt;
-    draw(dt);
+    draw(dt, now);
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);

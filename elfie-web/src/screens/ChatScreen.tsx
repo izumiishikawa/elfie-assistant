@@ -2306,6 +2306,18 @@ export default function ChatScreen() {
     [loadChats, createChat, openChat, lastChatKey],
   );
 
+  const handleCharacterActivated = useCallback(
+    async (charId: string) => {
+      if (activeChatId) {
+        fetch(`${API_BASE}/api/chats/${activeChatId}/summarize`, {
+          method: "POST",
+        }).catch(() => {});
+      }
+      await initChats(charId);
+    },
+    [activeChatId, initChats],
+  );
+
   useEffect(() => {
     (async () => {
       await loadSettings();
@@ -3762,6 +3774,7 @@ export default function ChatScreen() {
       <SettingsScreen
         visible={showSettings}
         onClose={() => setShowSettings(false)}
+        onCharacterActivated={handleCharacterActivated}
       />
 
       <AnimatePresence>

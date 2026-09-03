@@ -210,6 +210,9 @@ def run_active_indicator():
     def _push_subtitle(text):
         return _run_js(f'window.setSubtitle && window.setSubtitle({json.dumps(text)})')
 
+    def _push_kanji(ch):
+        return _run_js(f'window.showKanji && window.showKanji({json.dumps(ch)})')
+
     STEP     = 0.12
     OUT_STEP = 0.035
     alpha = [0.0]
@@ -262,6 +265,8 @@ def run_active_indicator():
                     GLib.idle_add(_push_state, msg['state'])
                 if 'subtitle' in msg:
                     GLib.idle_add(_push_subtitle, msg['subtitle'] or '')
+                if 'kanji' in msg:
+                    GLib.idle_add(_push_kanji, msg['kanji'] or '')
         except Exception:
             pass
         eof_flag[0] = True

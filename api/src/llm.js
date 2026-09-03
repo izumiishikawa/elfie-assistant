@@ -74,16 +74,9 @@ export function resolveModel(characterModel, forcePro = false, hasImages = false
   return getDefaultChatModel();
 }
 
-export function getFastVoiceModel() {
-  return _provider() === 'deepseek'
-    ? DEEPSEEK_DEFAULT_MODEL
-    : (process.env.VOICE_MODEL ?? 'openai/gpt-4o-mini');
-}
-
-export function getToolVoiceModel() {
-  return _provider() === 'deepseek'
-    ? getFastVoiceModel()
-    : (process.env.VOICE_TOOL_MODEL ?? getDefaultChatModel());
+export function getVoiceModel(characterModel) {
+  if (_provider() === 'deepseek') return getDefaultChatModel();
+  return characterModel?.trim() || getDefaultChatModel();
 }
 
 export function getToolChatModel() {

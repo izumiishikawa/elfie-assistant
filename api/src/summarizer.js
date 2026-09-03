@@ -39,7 +39,7 @@ export async function summarizeChat(chatId) {
     const embedding = await getEmbedding(summaryText);
 
     const s = await Settings.findOne().lean();
-    const charId = s?.activeCharacterId ?? (await Character.findOne().lean())?._id;
+    const charId = chat.characterId ?? s?.activeCharacterId ?? (await Character.findOne().lean())?._id;
     if (!charId) return null;
 
     const char = await Character.findById(charId);

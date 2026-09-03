@@ -118,78 +118,81 @@ const MemoryItem = memo(({ text, onDelete, onEdit }: {
 });
 
 
-interface ElevenVoice { voice_id: string; name: string; category: string; preview_url: string | null; }
-
-const VoicePicker = memo(({ value, onChange, provider }: {
-  value: string; onChange: (id: string) => void; provider: 'elevenlabs' | 'fishaudio';
+const SavedVoicesPicker = memo(({ value, onChange }: {
+  value: string; onChange: (id: string) => void;
 }) => {
-  const [voices, setVoices]   = useState<ElevenVoice[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [playing, setPlaying] = useState<string | null>(null);
-  const audioRef              = useRef<HTMLAudioElement | null>(null);
+  const { voicePresets } = useVoicePresetsStore();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = voicePresets.find((p) => p.voiceId === value) ?? null;
 
   useEffect(() => {
-    setLoading(true);
-    fetch(`${API_BASE}/api/voices?provider=${provider}`)
-      .then((r) => r.json())
-      .then((d) => setVoices(d.voices ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [provider]);
-
-  const preview = useCallback((voice: ElevenVoice) => {
-    if (!voice.preview_url) return;
-    if (playing === voice.voice_id) {
-      audioRef.current?.pause();
-      setPlaying(null);
-      return;
-    }
-    audioRef.current?.pause();
-    const audio = new Audio(voice.preview_url);
-    audioRef.current = audio;
-    audio.onended = () => setPlaying(null);
-    audio.play().then(() => setPlaying(voice.voice_id)).catch(() => {});
-  }, [playing]);
-
-  if (loading) return <p className="text-gray-400 text-[12px]">Loading voices...</p>;
-  if (!voices.length) return <p className="text-gray-400 text-[12px]">No voices available.</p>;
-
-  const grouped = voices.reduce<Record<string, ElevenVoice[]>>((acc, v) => {
-    const key = v.category === 'premade' ? 'Standard' : 'Your voices';
-    (acc[key] ??= []).push(v);
-    return acc;
-  }, {});
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
 
   return (
-    <div className="flex flex-col max-h-64 overflow-y-auto rounded-2xl border border-foreground bg-foreground">
-      {Object.entries(grouped).map(([group, list]) => (
-        <div key={group}>
-          <p className="text-gray-400 text-[9px] font-bold tracking-widest px-3 pt-2.5 pb-1 m-0 sticky top-0 bg-foreground">{group.toUpperCase()}</p>
-          {list.map((v) => {
-            const selected = value === v.voice_id;
-            return (
-              <div
-                key={v.voice_id}
-                className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${selected ? 'bg-accent/[0.12]' : 'hover:bg-foreground/50'}`}
-                onClick={() => onChange(v.voice_id)}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className={`m-0 text-[13px] font-medium truncate ${selected ? 'text-accent' : 'text-gray-300'}`}>{v.name}</p>
-                </div>
-                {v.preview_url && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); preview(v); }}
-                    className={`w-6 h-6 rounded-full flex items-center justify-center border-none cursor-pointer flex-shrink-0 transition-colors ${playing === v.voice_id ? 'bg-accent' : 'bg-foreground hover:bg-foreground'}`}
-                  >
-                    <Play size={9} color="#fff" fill="#fff" />
-                  </button>
-                )}
-                {selected && <div className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />}
-              </div>
-            );
-          })}
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between gap-2 w-full bg-foreground border border-foreground rounded-xl px-4 py-2.5 cursor-pointer text-left"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <Mic size={13} className="text-gray-400 flex-shrink-0" />
+          {selected ? (
+            <span className="text-white text-[13px] font-medium truncate">{selected.name}</span>
+          ) : (
+            <span className="text-gray-400 text-[13px]">Select a saved voice…</span>
+          )}
         </div>
-      ))}
+        <motion.div animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.18 }} className="flex-shrink-0">
+          <ChevronDown size={15} className="text-gray-400" />
+        </motion.div>
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="absolute left-0 right-0 mt-1.5 z-20 rounded-xl border border-foreground bg-background overflow-hidden"
+            style={{ boxShadow: '0 12px 28px rgba(0,0,0,0.45)' }}
+          >
+            {voicePresets.length === 0 ? (
+              <p className="text-gray-400 text-[12px] m-0 px-4 py-3">No saved voices yet. Add one in the Voice tab.</p>
+            ) : (
+              <div className="max-h-56 overflow-y-auto py-1">
+                {voicePresets.map((preset) => {
+                  const isSelected = value === preset.voiceId;
+                  return (
+                    <button
+                      type="button"
+                      key={preset._id}
+                      onClick={() => { onChange(preset.voiceId); setOpen(false); }}
+                      className={`flex items-center gap-2 w-full px-4 py-2.5 border-none cursor-pointer text-left transition-colors ${isSelected ? 'bg-accent/[0.12]' : 'hover:bg-foreground'}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className={`m-0 text-[13px] font-medium truncate ${isSelected ? 'text-accent' : 'text-gray-300'}`}>{preset.name}</p>
+                        <p className="m-0 text-[10px] font-semibold tracking-wide text-gray-500">
+                          {preset.provider === 'fishaudio' ? 'Fish Audio' : 'ElevenLabs'}
+                        </p>
+                      </div>
+                      {isSelected && <Check size={14} className="text-accent flex-shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 });
@@ -338,6 +341,7 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
   const [personality, setPersonality] = useState(character?.personality ?? '');
   const [model, setModel] = useState(character?.model ?? '');
   const [voiceId, setVoiceId] = useState(character?.voiceId ?? '');
+  const [greatSageWarnings, setGreatSageWarnings] = useState(character?.greatSageWarnings !== false);
   const [localPhoto, setLocalPhoto] = useState<{ uri: string; base64: string } | null>(null);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -367,7 +371,7 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
     if (!name.trim()) { window.alert('Name is required.'); return; }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { name: name.trim(), personality, model, voiceId };
+      const body: Record<string, unknown> = { name: name.trim(), personality, model, voiceId, greatSageWarnings };
       if (localPhoto) body.photoBase64 = localPhoto.base64;
       const isNew = !character?._id;
       const url = isNew ? `${API_BASE}/api/characters` : `${API_BASE}/api/characters/${character!._id}`;
@@ -380,7 +384,7 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
       onSaved();
     } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
-  }, [name, personality, model, voiceId, localPhoto, character, onSaved]);
+  }, [name, personality, model, voiceId, greatSageWarnings, localPhoto, character, onSaved]);
 
   const deleteCharacter = useCallback(async () => {
     if (!character?._id) return;
@@ -501,8 +505,19 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
             autoComplete="off"
             spellCheck={false}
           />
-          <VoicePicker value={voiceId} onChange={setVoiceId} provider={ttsProvider} />
+          <SavedVoicesPicker value={voiceId} onChange={setVoiceId} />
           {!voiceId && <p className="text-gray-300 text-[11px] mt-1.5 m-0">If empty, uses the server default voice.</p>}
+        </div>
+
+        <div className="mb-5 pt-5 border-t border-foreground flex items-center justify-between">
+          <div>
+            <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0">GREAT SAGE WARNINGS</p>
+            <p className="text-gray-300 text-[11px] m-0 max-w-[320px]">
+              Plays a cue sound and shows a kanji on the floating overlay when this character fires a routine
+              on its own, or starts using a tool during a voice reply.
+            </p>
+          </div>
+          <Switch checked={greatSageWarnings} onChange={() => setGreatSageWarnings((v) => !v)} />
         </div>
 
         {character?._id && (
@@ -2099,7 +2114,11 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
 
 type Tab = 'personagens' | 'sobre-mim' | 'memoria' | 'provedor' | 'voz' | 'skills' | 'rotinas' | 'automacoes' | 'conhecimento' | 'mind' | 'aparencia' | 'integracoes' | 'debug';
 
-export default function SettingsScreen({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+export default function SettingsScreen({ visible, onClose, onCharacterActivated }: {
+  visible: boolean;
+  onClose: () => void;
+  onCharacterActivated?: (id: string) => void;
+}) {
   const { characters, activeCharacterId, loadSettings, aiName, accentColor, setAccentColor } = useSettingsStore();
   const { skills, packages, loadSkills, loadPackages } = useSkillsStore();
   const { voicePresets, loadVoicePresets } = useVoicePresetsStore();
@@ -2294,8 +2313,9 @@ export default function SettingsScreen({ visible, onClose }: { visible: boolean;
         setUserBasicData(char.userBasicData || '');
         setLongTermMemory(Array.isArray(char.longTermMemory) ? char.longTermMemory : []);
       }
+      onCharacterActivated?.(id);
     } catch (err) { console.error('[activateCharacter]', err); }
-  }, [loadSettings, characters]);
+  }, [loadSettings, characters, onCharacterActivated]);
 
   const saveSobreMim = useCallback(async () => {
     setSaving(true);

@@ -189,6 +189,12 @@ async function handleMessage(token, message) {
     } catch (err) {
       console.error('[telegram] photo download failed:', err.message);
     }
+  } else if (message.document?.mime_type?.startsWith('image/')) {
+    try {
+      imageFilenames.push(await downloadTelegramFile(token, message.document.file_id));
+    } catch (err) {
+      console.error('[telegram] document image download failed:', err.message);
+    }
   }
 
   let respondAsVoice = false;
