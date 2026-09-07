@@ -75,6 +75,14 @@ if [[ $STAGE_ONLY == 1 ]]; then
   exit 0
 fi
 
+# O compilador roda como uid 1000 dentro do container e escreve o exe no bind
+# mount de saida. Se o dono de $DIST no host nao for 1000, ele leva "Error 5:
+# Access denied" e o build morre. Localmente isso passou por coincidencia (uid
+# 1000 dos dois lados); no runner do GitHub o usuario e 1001 e quebrou. 0777 no
+# diretorio de saida e o jeito portavel de nao depender do uid de quem builda —
+# passar --user pro docker quebraria o WINEPREFIX da imagem.
+chmod 0777 "$DIST"
+
 echo "==> compilando com $IMAGE"
 docker run --rm \
   -v "$STAGE:/work" \
