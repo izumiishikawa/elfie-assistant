@@ -1,10 +1,6 @@
 <div align="center">
 
-<img src="docs/elfie.png" alt="Elfie" width="200">
-
-<h1>Elfie</h1>
-
-<p><b>An AI companion with a persistent memory, a voice, and skills she can write for herself.</b></p>
+<img src="docs/banner.png" alt="Elfie — a fully customizable AI companion to be by your side, always." width="100%">
 
 <p>
   <a href="installer/ElfieSetup.exe">
