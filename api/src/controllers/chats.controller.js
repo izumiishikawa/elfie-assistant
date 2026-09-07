@@ -27,7 +27,7 @@ import { WebSocket } from "ws";
 import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
 import { getLLMClient, resolveModel, getDefaultChatModel, getVoiceModel, getToolChatModel, getThinkingParams, withCacheControl, getCharacterModel } from "../llm.js";
 import { getTTSProvider, getFishAudioApiKey, getFishAudioDefaultVoiceId } from "../voice.js";
-import { loadSkillToolState, visibleDynamicTools, alwaysVisibleDynamicTools, runSkill, createDynamicSkill, editDynamicSkill } from "../dynamicSkills.js";
+import { loadSkillToolState, visibleDynamicTools, alwaysVisibleDynamicTools, runSkill, saveSkillImage, createDynamicSkill, editDynamicSkill } from "../dynamicSkills.js";
 import { createPendingConfirmation, resolvePendingConfirmation } from "../skillConfirmations.js";
 import Skill from "../models/Skill.js";
 import SkillPackage from "../models/SkillPackage.js";
@@ -3152,39 +3152,26 @@ function formatSkillResult(result) {
     : `Success (HTTP ${result.status}). Empty response body — this is normal for many APIs and does NOT mean it failed.`;
 }
 
-function resolveJsonPath(value, path) {
-  return path.split(".").reduce((acc, key) => (acc == null ? undefined : acc[key]), value);
-}
+async function deliverSkillImage(skill, result, sendEvent, collectedImages, toDesktop = false) {
+  const saved = await saveSkillImage(skill, result);
+  if (!saved.ok) return saved.error;
 
-async function deliverSkillImage(skill, result, sendEvent, collectedImages) {
-  if (!result.ok) return `Error (HTTP ${result.status || 0}): ${result.body}`;
-
-  let buffer, contentType;
-  if (skill.imageUrlField) {
-    let parsed;
+  // Numa conversa falada não existe onde a imagem apareça, então ela vai pra tela
+  // pelo visualizador padrão do sistema (daemon, comando open_image). Antes disso
+  // skills de imagem eram simplesmente escondidas da voz (excludeImage), o que
+  // deixava a ferramenta existindo no texto e sumindo na voz sem explicação.
+  if (toDesktop) {
     try {
-      parsed = JSON.parse(result.body);
-    } catch {
-      return "Skill response was not valid JSON — cannot extract an image URL from it.";
+      await sendToDaemon({ cmd: "open_image", filename: saved.filename });
+      return "Image opened on the user's screen.";
+    } catch (err) {
+      console.error("[deliverSkillImage] daemon offline:", err.message);
+      return "Got the image, but could not open it on screen — the desktop daemon is not running.";
     }
-    const imageUrl = resolveJsonPath(parsed, skill.imageUrlField);
-    if (typeof imageUrl !== "string" || !imageUrl.trim()) {
-      return `Could not find an image URL at "${skill.imageUrlField}" in the response.`;
-    }
-    const resp = await fetch(imageUrl);
-    if (!resp.ok) return `Failed to download image: HTTP ${resp.status}`;
-    buffer = Buffer.from(await resp.arrayBuffer());
-    contentType = resp.headers.get("content-type") ?? "";
-  } else {
-    buffer = result.buffer;
-    contentType = result.contentType ?? "";
   }
 
-  const ext = contentType.includes("png") ? "png" : contentType.includes("gif") ? "gif" : contentType.includes("webp") ? "webp" : "jpg";
-  const filename = `${randomBytes(16).toString("hex")}.${ext}`;
-  await writeFile(resolve(uploadDir, filename), buffer);
-  sendEvent({ type: "generated_images", filenames: [filename] });
-  collectedImages.push(filename);
+  sendEvent({ type: "generated_images", filenames: [saved.filename] });
+  collectedImages.push(saved.filename);
   return "Image sent.";
 }
 
@@ -3202,6 +3189,9 @@ async function executeTool(
   chatId = null,
   signal = null,
   toolsGate = null,
+  // Voz: sem interface pra mostrar imagem, então o que uma skill de imagem
+  // devolver é aberto no visualizador do sistema em vez de anexado à conversa.
+  imagesToDesktop = false,
 ) {
   if (signal?.aborted) return "Cancelled by user.";
 
@@ -4615,7 +4605,7 @@ async function executeTool(
           sendEvent({ type: "confirmation_resolved", confirmationId, decision: "approved" });
           const result = await runSkill(dynamicSkill, args);
           return dynamicSkill.responseMode === "image"
-            ? await deliverSkillImage(dynamicSkill, result, sendEvent, collectedImages)
+            ? await deliverSkillImage(dynamicSkill, result, sendEvent, collectedImages, imagesToDesktop)
             : formatSkillResult(result);
         }
         if (decision.action === "timeout") {
@@ -4638,7 +4628,7 @@ async function executeTool(
       console.log(`[${name}]`, rawArgs);
       const result = await runSkill(dynamicSkill, args);
       if (dynamicSkill.responseMode === "image") {
-        return await deliverSkillImage(dynamicSkill, result, sendEvent, collectedImages);
+        return await deliverSkillImage(dynamicSkill, result, sendEvent, collectedImages, imagesToDesktop);
       }
       return result.ok ? result.body : `Error (HTTP ${result.status || 0}): ${result.body}`;
     } catch (err) {
@@ -5979,8 +5969,8 @@ export async function voiceRespond(req, res) {
     const runFirstPass = async (withTools) => {
       const toolsForCall = withTools
         ? ((settings?.unlimitedTools || toolsGate.open)
-          ? [...VOICE_TOOLS, ...visibleDynamicTools(skillToolState, openedPackageIds, { excludeImage: true })]
-          : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState, { excludeImage: true })])
+          ? [...VOICE_TOOLS, ...visibleDynamicTools(skillToolState, openedPackageIds)]
+          : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState)])
         : undefined;
       const systemMsg = { role: "system", content: withCacheControl(staticPrompt, voiceModel) };
       const stream = await getLLMClient().chat.completions.create({
@@ -6059,8 +6049,8 @@ export async function voiceRespond(req, res) {
         history,
         priorText: firstPassText,
         tools: (settings?.unlimitedTools || toolsGate.open)
-          ? [...VOICE_TOOLS, ...visibleDynamicTools(skillToolState, openedPackageIds, { excludeImage: true })]
-          : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState, { excludeImage: true })],
+          ? [...VOICE_TOOLS, ...visibleDynamicTools(skillToolState, openedPackageIds)]
+          : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState)],
         thinkingHasTools: false,
       });
       if (grace.toolCalls.length > 0) {
@@ -6089,7 +6079,7 @@ export async function voiceRespond(req, res) {
             tc.name, tc.arguments, sendEvent,
             collectedSources, collectedCards, collectedImages,
             collectedGifs, collectedVoiceNotes, char?.voiceId || "",
-            openedPackageIds, chatId, null, toolsGate,
+            openedPackageIds, chatId, null, toolsGate, true,
           );
           return { role: "tool", tool_call_id: tc.id, content: result };
         }));
@@ -6123,8 +6113,8 @@ export async function voiceRespond(req, res) {
           max_tokens: MAX_TOKENS_VOICE,
           ...(usingTools && {
             tools: (settings?.unlimitedTools || toolsGate.open)
-              ? [...VOICE_CONTINUATION_TOOLS, ...visibleDynamicTools(skillToolState, openedPackageIds, { excludeImage: true })]
-              : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState, { excludeImage: true })],
+              ? [...VOICE_CONTINUATION_TOOLS, ...visibleDynamicTools(skillToolState, openedPackageIds)]
+              : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState)],
             tool_choice: "auto",
           }),
           ...getThinkingParams(false),

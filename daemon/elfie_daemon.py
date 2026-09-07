@@ -822,6 +822,31 @@ class ElfieDaemon:
             self._set_state('processing')
             self._stream_voice(api, chat, transcript, selected_text)
 
+    def _open_image(self, filename: str):
+        """Baixa uma imagem servida pela API e abre no visualizador do sistema.
+
+        Existe pro modo de voz: uma skill que devolve imagem não tem onde aparecer
+        numa conversa falada, então em vez de escondê-la (era o que
+        excludeImage fazia) a imagem vai pra tela do usuário.
+        """
+        api = self.cfg.get('apiBase', 'http://localhost:3000')
+        # basename: o nome vem da API pelo loopback, mas montar caminho com o que
+        # chega de fora sem cortar diretório é como se escreve um path traversal.
+        safe = os.path.basename(filename)
+        if not safe:
+            return
+        try:
+            r = self._session.get(f'{api}/files/{safe}', timeout=20)
+            r.raise_for_status()
+            dest_dir = plat.runtime_dir() / 'images'
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            path = dest_dir / safe
+            path.write_bytes(r.content)
+            plat.open_with_default_app(str(path))
+            print(f'\n[elfie] imagem aberta: {path}', flush=True)
+        except Exception as ex:
+            print(f'\n[elfie] falha ao abrir imagem {safe}: {ex}', flush=True)
+
     def _create_new_chat(self, api: str) -> str:
         r = self._session.post(f'{api}/api/chats', timeout=10)
         r.raise_for_status()
@@ -2359,6 +2384,17 @@ class ElfieDaemon:
             self._set_state('speaking')
             self._aud_q.put({'audio': filename, 'text': ''})
             self._aud_q.put(None)
+            return {'ok': True}
+
+        if action == 'open_image':
+            filename = cmd.get('filename', '').strip()
+            if not filename:
+                return {'error': 'filename obrigatório'}
+            # Em thread: baixar pode levar segundos e o lado da API (sendToDaemon,
+            # neuroStore.js) desiste em 5s — segurar a resposta aqui faria a skill
+            # parecer que falhou justamente quando ela deu certo.
+            threading.Thread(target=self._open_image, args=(filename,),
+                             daemon=True, name='open-image').start()
             return {'ok': True}
 
         return {'error': f'comando desconhecido: {action}'}

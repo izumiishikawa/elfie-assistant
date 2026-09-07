@@ -1,5 +1,12 @@
+import { writeFile } from 'fs/promises';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { randomBytes } from 'crypto';
 import Skill from './models/Skill.js';
 import SkillPackage from './models/SkillPackage.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const uploadDir = resolve(__dirname, '..', 'uploads');
 
 const SKILL_NAME_RE = /^[a-z0-9_]+$/;
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
@@ -198,6 +205,51 @@ export async function runSkill(skill, args = {}) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function resolveJsonPath(value, path) {
+  return path.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), value);
+}
+
+// Pega a imagem que uma skill responseMode:'image' devolveu e grava em uploads/,
+// devolvendo o nome do arquivo — que é o que a API serve em /files/<nome>.
+//
+// Mora aqui, e não em chats.controller.js junto do deliverSkillImage que a
+// originou, porque agora tem dois consumidores com destinos diferentes: o chat de
+// texto manda o arquivo pro cliente, e a voz manda o daemon abrir na tela. A
+// extração (baixar de imageUrlField ou usar o corpo cru) é idêntica nos dois.
+export async function saveSkillImage(skill, result) {
+  if (!result.ok) return { ok: false, error: `Error (HTTP ${result.status || 0}): ${result.body}` };
+
+  let buffer;
+  let contentType;
+  if (skill.imageUrlField) {
+    let parsed;
+    try {
+      parsed = JSON.parse(result.body);
+    } catch {
+      return { ok: false, error: 'Skill response was not valid JSON — cannot extract an image URL from it.' };
+    }
+    const imageUrl = resolveJsonPath(parsed, skill.imageUrlField);
+    if (typeof imageUrl !== 'string' || !imageUrl.trim()) {
+      return { ok: false, error: `Could not find an image URL at "${skill.imageUrlField}" in the response.` };
+    }
+    const resp = await fetch(imageUrl);
+    if (!resp.ok) return { ok: false, error: `Failed to download image: HTTP ${resp.status}` };
+    buffer = Buffer.from(await resp.arrayBuffer());
+    contentType = resp.headers.get('content-type') ?? '';
+  } else {
+    buffer = result.buffer;
+    contentType = result.contentType ?? '';
+  }
+
+  const ext = contentType.includes('png') ? 'png'
+    : contentType.includes('gif') ? 'gif'
+    : contentType.includes('webp') ? 'webp'
+    : 'jpg';
+  const filename = `${randomBytes(16).toString('hex')}.${ext}`;
+  await writeFile(resolve(uploadDir, filename), buffer);
+  return { ok: true, filename };
 }
 
 // Shared by chats.controller.js's create_skill/forge_skill and inworldRealtime.js's

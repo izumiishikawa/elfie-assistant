@@ -12,7 +12,7 @@ import { listVoicePresets, switchActiveVoice } from './voicePresets.js';
 import { executeWebSearch, executeWebFetch } from './webTools.js';
 import { executeImageVision } from './visionTools.js';
 import { executeScreenshot } from './screenshotTool.js';
-import { buildToolSchema, runSkill, createDynamicSkill, editDynamicSkill } from './dynamicSkills.js';
+import { buildToolSchema, runSkill, saveSkillImage, createDynamicSkill, editDynamicSkill } from './dynamicSkills.js';
 import { sendToDaemon } from './neuroStore.js';
 
 // Bridges the browser (elfie-web/src/screens/InworldCallOverlay.tsx) and the
@@ -61,8 +61,20 @@ function toRealtimeToolSchema(skill) {
 async function loadVoiceDynamicSkillTools() {
   try {
     const packages = await SkillPackage.find({ name: { $in: VOICE_SKILL_PACKAGE_NAMES } }).lean();
-    if (packages.length === 0) return { tools: [], skillsByName: new Map() };
-    const skills = await Skill.find({ packageId: { $in: packages.map((p) => p._id) }, enabled: true })
+    const packageIds = packages.map((p) => p._id);
+
+    // Duas fontes. A allowlist de pacotes acima, E toda skill marcada
+    // alwaysVisible — que é exatamente o conjunto que o modo de voz normal manda
+    // (alwaysVisibleDynamicTools, em voiceRespond). Só a allowlist rodava aqui,
+    // então uma skill marcada alwaysVisible sem pacote nenhum — que é como as 4
+    // do banco estão — existia no texto e sumia na voz do Inworld, sem aviso.
+    //
+    // O early return de "nenhum pacote encontrado" saiu junto: ele derrubava as
+    // alwaysVisible por tabela quando a allowlist não casava com nada.
+    const orClauses = [{ alwaysVisible: true }];
+    if (packageIds.length) orClauses.unshift({ packageId: { $in: packageIds } });
+
+    const skills = await Skill.find({ enabled: true, $or: orClauses })
       .select('+authValue')
       .lean();
     return { tools: skills.map(toRealtimeToolSchema), skillsByName: new Map(skills.map((s) => [s.name, s])) };
@@ -585,6 +597,22 @@ async function runInworldTool(name, argsJson, skillsByName) {
   if (skill) {
     const result = await runSkill(skill, args);
     if (!result.ok) return `Failed (HTTP ${result.status || 'network error'}): ${result.body}`;
+
+    // Numa ligação não existe onde a imagem apareça — manda o daemon abrir no
+    // visualizador padrão do sistema. Devolver o corpo cru pro modelo faria ela
+    // ler bytes ou uma URL em voz alta, que não ajuda ninguém.
+    if (skill.responseMode === 'image') {
+      const saved = await saveSkillImage(skill, result);
+      if (!saved.ok) return saved.error;
+      try {
+        await sendToDaemon({ cmd: 'open_image', filename: saved.filename });
+        return "Image opened on the user's screen.";
+      } catch (err) {
+        console.error('[inworldRealtime] open_image falhou (daemon offline?):', err.message);
+        return 'Got the image, but could not open it on screen — the desktop daemon is not running.';
+      }
+    }
+
     return result.body;
   }
 

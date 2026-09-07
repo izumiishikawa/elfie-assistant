@@ -237,6 +237,22 @@ def playback_cmd(sample_rate: int = 24000) -> list[str]:
             '-nodisp', '-autoexit', '-i', 'pipe:0']
 
 
+def open_with_default_app(path: str) -> None:
+    """Abre um arquivo no aplicativo padrão do sistema (visualizador de imagem, etc).
+
+    Não bloqueia: quem chama não quer esperar o visualizador fechar. O caminho tem
+    que ser LOCAL — `xdg-open` numa URL abriria o navegador, não o visualizador,
+    que é o oposto do pedido.
+    """
+    if IS_WINDOWS:
+        os.startfile(path)  # noqa: S606 — é a API do shell do Windows, é o ponto
+        return
+    opener = 'open' if IS_MACOS else 'xdg-open'
+    subprocess.Popen([opener, path],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     **popen_flags())
+
+
 def mp3_play_cmd(path: str, volume: float = 1.0, loop: bool = False) -> list[str]:
     """Toca um mp3. mpg123 no Linux (como sempre foi); ffplay no resto, que é a
     única dependência de áudio que já era obrigatória nas outras plataformas."""
