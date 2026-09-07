@@ -4920,6 +4920,12 @@ export async function deleteChat(req, res) {
   }
 }
 
+// Quantas mensagens anteriores acompanham cada turno. Conta MENSAGENS, não
+// turnos: splitAiText pode quebrar uma resposta dela em 2-3 mensagens, então a
+// janela real em idas e vindas é menor que o número sugere — subir aqui é a
+// única mudança necessária se a conversa começar a parecer curta de memória.
+const HISTORY_WINDOW_MESSAGES = 40;
+
 export async function runAgentTurn({
   chat, char, settings, text, imageFilenames = [],
   forceThinking = false, forcePro = false, isFirstMessage = false, sendEvent, signal,
@@ -4932,8 +4938,14 @@ export async function runAgentTurn({
   const deepSeekVisionTurn =
     imageFilenames.length > 0 && settings?.llmProvider === "deepseek";
 
+  // Janela rolante: a conversa continua a mesma, só as mensagens mais antigas
+  // param de ser reenviadas a cada turno. Antes daqui ia o histórico INTEIRO, e o
+  // único freio era o daemon trocar de chat ao passar de 40 mensagens no meio da
+  // conversa — perdendo o contexto todo de uma vez, que é justamente o que não
+  // podia acontecer. slice(-(N+1), -1) pega as N anteriores à mensagem atual (a
+  // última entrada é sempre o turno em andamento).
   const { messages: gapAnnotatedHistory, lastAt: lastHistoryMessageAt } =
-    withTimeGapNotes(chat.messages.slice(0, -1));
+    withTimeGapNotes(chat.messages.slice(-(HISTORY_WINDOW_MESSAGES + 1), -1));
   const prevMessages = mergeConsecutiveAssistant(
     gapAnnotatedHistory.map((m) =>
       m.role === "system"

@@ -840,10 +840,14 @@ class ElfieDaemon:
             if r.status_code == 404:
                 return self._create_new_chat(api)
             r.raise_for_status()
-            data = r.json()
-            msgs = data.get('messages', [])
-            if len(msgs) > 40:
-                return self._create_new_chat(api)
+            r.json()
+            # NÃO troca mais de chat por tamanho. Isso existia como único freio
+            # pro histórico que a API montava (ela mandava chat.messages inteiro
+            # pro modelo), mas o preço era abandonar a conversa no meio ao passar
+            # de 40 mensagens e perder o contexto de uma vez. O freio agora é uma
+            # janela rolante do lado da API (HISTORY_WINDOW_MESSAGES em
+            # chats.controller.js): a conversa continua a mesma, só as mensagens
+            # mais antigas param de ser reenviadas.
         except requests.HTTPError:
             raise
         except Exception:
