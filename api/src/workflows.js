@@ -62,7 +62,10 @@ async function runPromptNode(node, context, workflow) {
   const { char, settings } = await resolveCharAndSettings(workflow);
   if (!char) throw new Error('Nenhum personagem disponível para executar este step');
 
-  const chat = await Chat.create({ characterId: char._id });
+  // hidden: o Chat aqui é só o recipiente que runAgentTurn exige pra rodar um
+  // turno; o produto deste nó é o `output` que segue pro resto do grafo. Cada
+  // execução criava uma conversa nova na lista do usuário, que nunca foi a ideia.
+  const chat = await Chat.create({ characterId: char._id, hidden: true });
   chat.messages.push({ role: 'user', content: promptText, triggeredByWorkflow: workflow._id });
   await chat.save();
 

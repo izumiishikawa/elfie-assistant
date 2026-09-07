@@ -4859,11 +4859,35 @@ export async function createChat(_req, res) {
   }
 }
 
+// O prompt que uma rotina ou automação injeta é o GATILHO dela, não algo que o
+// usuário escreveu — mostrá-lo como mensagem dele é a mentira reclamada: a rotina
+// tem que parecer que foi ela quem começou a conversa.
+//
+// Filtra na LEITURA em vez de deixar de gravar, de propósito. runAgentTurn monta
+// o histórico com chat.messages.slice(0, -1), contando que a última entrada seja
+// o turno atual; e se o usuário responder nessa mesma conversa depois, o modelo
+// precisa do prompt no histórico, senão a mensagem de abertura dela fica sem
+// antecedente nenhum. Filtrar na saída também conserta os chats que já existem,
+// que uma flag nova só resolveria daqui pra frente.
+function isInjectedPrompt(m) {
+  return m.role === "user" && (m.triggeredByRoutine || m.triggeredByWorkflow);
+}
+
 export async function listChats(_req, res) {
   try {
     const characterId = await getActiveCharacterId();
     const chats = await Chat.find(
-      { $or: [{ characterId }, { characterId: null }] },
+      {
+        $or: [{ characterId }, { characterId: null }],
+        hidden: { $ne: true },
+        // Metade retroativa: os chats de automação criados ANTES da flag `hidden`
+        // existir não têm como carregá-la, e são 26 no banco atual. Reconhece-os
+        // pela marca que já vai em cada mensagem injetada. Pode sair daqui quando
+        // esses chats forem apagados ou receberem a flag.
+        messages: {
+          $not: { $elemMatch: { triggeredByWorkflow: { $exists: true, $ne: null } } },
+        },
+      },
       "_id title createdAt updatedAt",
     ).sort({ updatedAt: -1 });
     res.json(chats);
@@ -4875,8 +4899,9 @@ export async function listChats(_req, res) {
 
 export async function getChat(req, res) {
   try {
-    const chat = await Chat.findById(req.params.id);
+    const chat = await Chat.findById(req.params.id).lean();
     if (!chat) return res.status(404).json({ error: "Chat not found" });
+    chat.messages = (chat.messages ?? []).filter((m) => !isInjectedPrompt(m));
     res.json(chat);
   } catch (err) {
     console.error("[getChat]", err);

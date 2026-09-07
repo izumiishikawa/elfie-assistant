@@ -43,7 +43,16 @@ function chunkMessages(pendingMessages, baseIndex, flushTrailing) {
     const idx = baseIndex + i;
     const text = messageText(m);
     if (!text) return;
-    const line = `${m.role === 'user' ? 'Usuário' : 'Elfie'}: ${text}`;
+    // O prompt de uma rotina/automação NÃO foi o usuário que escreveu. Indexá-lo
+    // como "Usuário:" planta uma lembrança falsa: numa busca no histórico o modelo
+    // encontra o Izumi "pedindo" coisas que na verdade são o gatilho agendado.
+    // Mesma mentira que ele apontou na interface, só que na camada de memória.
+    // Rotular em vez de descartar mantém o antecedente da resposta dela no chunk.
+    const speaker =
+      m.role === 'user'
+        ? (m.triggeredByRoutine || m.triggeredByWorkflow ? 'Gatilho automático' : 'Usuário')
+        : 'Elfie';
+    const line = `${speaker}: ${text}`;
 
     if (line.length > MAX_CHUNK_CHARS) {
       flushBuffer(idx - 1);
