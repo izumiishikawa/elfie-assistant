@@ -196,6 +196,10 @@ def run_active_indicator(great_sage_html, subtitle_html,
                 subtitle.js(f'window.setSubtitle && window.setSubtitle({json.dumps(msg["subtitle"] or "")})')
             if 'kanji' in msg:
                 emblem.js(f'window.showKanji && window.showKanji({json.dumps(msg["kanji"] or "")})')
+            if 'tool' in msg:
+                # Nome vazio = ferramenta terminou; ver showToolIcon em
+                # overlay/great_sage.html, o mesmo HTML que o Linux carrega.
+                emblem.js(f'window.showToolIcon && window.showToolIcon({json.dumps(msg["tool"] or "")})')
 
         def _on_eof():
             _fade(overlays, 0.0, 0.035, done=lambda: [o.destroy() for o in overlays])

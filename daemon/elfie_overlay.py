@@ -231,6 +231,11 @@ def run_active_indicator():
     def _push_kanji(ch):
         return _run_js(f'window.showKanji && window.showKanji({json.dumps(ch)})')
 
+    def _push_tool(name):
+        # Nome vazio/None = ferramenta terminou, esconde o losango. Ver
+        # showToolIcon em overlay/great_sage.html.
+        return _run_js(f'window.showToolIcon && window.showToolIcon({json.dumps(name)})')
+
     STEP     = 0.12
     OUT_STEP = 0.035
     alpha = [0.0]
@@ -285,6 +290,12 @@ def run_active_indicator():
                     GLib.idle_add(_push_subtitle, msg['subtitle'] or '')
                 if 'kanji' in msg:
                     GLib.idle_add(_push_kanji, msg['kanji'] or '')
+                if 'tool' in msg:
+                    # O daemon manda isso desde que _show_tool_activity existe,
+                    # mas ate agora nao havia ramo nenhum lendo a chave — a
+                    # mensagem chegava e era descartada em silencio, e nenhuma
+                    # ferramenta aparecia no overlay.
+                    GLib.idle_add(_push_tool, msg['tool'] or '')
         except Exception:
             pass
         eof_flag[0] = True

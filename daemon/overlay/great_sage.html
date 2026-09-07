@@ -140,6 +140,246 @@
     ctx.restore();
   }
 
+
+  // ── Losango de ferramenta ─────────────────────────────────────────────────
+  // Parente do cubo do kanji acima, mas com semantica oposta: o kanji e um CUE
+  // (pisca e some sozinho, cronometrado), isso aqui e um ESTADO — "ela esta
+  // executando tal ferramenta AGORA" — entao forma, fica o tempo que a
+  // ferramenta durar, e so sai quando chega showToolIcon(null).
+  //
+  // A CAIXA gira 45 graus; o icone NAO gira junto. Um icone inclinado no
+  // tamanho que sobra dentro de um losango pequeno fica ilegivel, e o ponto do
+  // icone e ser reconhecido de relance.
+  //
+  // Icones sao path vetorial em canvas, nao emoji nem fonte de icone: o overlay
+  // roda em WebKit2 no Linux e WebView2 no Windows, e depender de uma familia de
+  // fonte instalada daria tofu (caixinha) numa das duas sem aviso nenhum.
+
+  const TOOL_FORM_MS  = 420;
+  const TOOL_FADE_MS  = 320;
+  const TOOL_SWAP_MS  = 200;
+  const TOOL_LAYERS   = 6;
+
+  let toolCue = null; // { icon, t0, out, swapAt }
+
+  // Cada icone desenha numa grade de -1..1 com o centro em (0,0); quem chama
+  // cuida da escala, da cor e da espessura.
+  const ICON = {
+    search(c) {
+      c.beginPath(); c.arc(-0.18, -0.18, 0.58, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.moveTo(0.24, 0.24); c.lineTo(0.82, 0.82); c.stroke();
+    },
+    globe(c) {
+      c.beginPath(); c.arc(0, 0, 0.82, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.moveTo(-0.82, 0); c.lineTo(0.82, 0); c.stroke();
+      c.beginPath(); c.ellipse(0, 0, 0.40, 0.82, 0, 0, Math.PI * 2); c.stroke();
+    },
+    camera(c) {
+      c.beginPath();
+      c.moveTo(-0.85, -0.28); c.lineTo(-0.48, -0.28); c.lineTo(-0.32, -0.58);
+      c.lineTo(0.32, -0.58);  c.lineTo(0.48, -0.28);  c.lineTo(0.85, -0.28);
+      c.lineTo(0.85, 0.62);   c.lineTo(-0.85, 0.62);  c.closePath(); c.stroke();
+      c.beginPath(); c.arc(0, 0.16, 0.30, 0, Math.PI * 2); c.stroke();
+    },
+    eye(c) {
+      c.beginPath();
+      c.moveTo(-0.90, 0);
+      c.quadraticCurveTo(0, -0.74, 0.90, 0);
+      c.quadraticCurveTo(0, 0.74, -0.90, 0);
+      c.closePath(); c.stroke();
+      c.beginPath(); c.arc(0, 0, 0.25, 0, Math.PI * 2); c.fill();
+    },
+    terminal(c) {
+      c.beginPath(); c.rect(-0.88, -0.66, 1.76, 1.32); c.stroke();
+      c.beginPath(); c.moveTo(-0.50, -0.22); c.lineTo(-0.14, 0.06); c.lineTo(-0.50, 0.34); c.stroke();
+      c.beginPath(); c.moveTo(0.08, 0.34); c.lineTo(0.56, 0.34); c.stroke();
+    },
+    sparkle(c) {
+      c.beginPath();
+      c.moveTo(0, -0.95);
+      c.quadraticCurveTo(0.13, -0.13, 0.95, 0);
+      c.quadraticCurveTo(0.13, 0.13, 0, 0.95);
+      c.quadraticCurveTo(-0.13, 0.13, -0.95, 0);
+      c.quadraticCurveTo(-0.13, -0.13, 0, -0.95);
+      c.fill();
+    },
+    pencil(c) {
+      c.beginPath();
+      c.moveTo(-0.78, 0.78); c.lineTo(-0.60, 0.18); c.lineTo(0.40, -0.82);
+      c.lineTo(0.82, -0.40); c.lineTo(-0.18, 0.60); c.closePath(); c.stroke();
+      c.beginPath(); c.moveTo(-0.60, 0.18); c.lineTo(-0.18, 0.60); c.stroke();
+    },
+    trash(c) {
+      c.beginPath(); c.moveTo(-0.80, -0.50); c.lineTo(0.80, -0.50); c.stroke();
+      c.beginPath();
+      c.moveTo(-0.30, -0.50); c.lineTo(-0.30, -0.82); c.lineTo(0.30, -0.82); c.lineTo(0.30, -0.50);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(-0.58, -0.50); c.lineTo(-0.46, 0.82); c.lineTo(0.46, 0.82); c.lineTo(0.58, -0.50);
+      c.stroke();
+    },
+    flask(c) {
+      c.beginPath();
+      c.moveTo(-0.30, -0.80); c.lineTo(-0.30, -0.14); c.lineTo(-0.76, 0.64);
+      c.quadraticCurveTo(-0.88, 0.86, -0.60, 0.86);
+      c.lineTo(0.60, 0.86);
+      c.quadraticCurveTo(0.88, 0.86, 0.76, 0.64);
+      c.lineTo(0.30, -0.14); c.lineTo(0.30, -0.80);
+      c.stroke();
+      c.beginPath(); c.moveTo(-0.48, -0.80); c.lineTo(0.48, -0.80); c.stroke();
+    },
+    waveform(c) {
+      const bars = [0.32, 0.60, 0.92, 0.52, 0.24];
+      for (let i = 0; i < bars.length; i++) {
+        const x = -0.72 + i * 0.36;
+        c.beginPath(); c.moveTo(x, -bars[i]); c.lineTo(x, bars[i]); c.stroke();
+      }
+    },
+    picture(c) {
+      c.beginPath(); c.rect(-0.85, -0.64, 1.70, 1.28); c.stroke();
+      c.beginPath(); c.arc(-0.38, -0.22, 0.17, 0, Math.PI * 2); c.stroke();
+      c.beginPath();
+      c.moveTo(-0.85, 0.42); c.lineTo(-0.20, -0.14); c.lineTo(0.24, 0.24);
+      c.lineTo(0.52, 0.02); c.lineTo(0.85, 0.34); c.stroke();
+    },
+    gear(c) {
+      c.beginPath(); c.arc(0, 0, 0.50, 0, Math.PI * 2); c.stroke();
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4;
+        c.beginPath();
+        c.moveTo(Math.cos(a) * 0.56, Math.sin(a) * 0.56);
+        c.lineTo(Math.cos(a) * 0.90, Math.sin(a) * 0.90);
+        c.stroke();
+      }
+      c.beginPath(); c.arc(0, 0, 0.17, 0, Math.PI * 2); c.stroke();
+    },
+  };
+
+  const TOOL_ICONS = {
+    web_search: ICON.search,
+    web_fetch: ICON.globe,
+    browse_screenshot: ICON.camera,
+    computer_screenshot: ICON.camera,
+    see_image: ICON.eye,
+    execute_command: ICON.terminal,
+    forge_skill: ICON.sparkle,
+    edit_skill: ICON.pencil,
+    delete_skill: ICON.trash,
+    test_skill: ICON.flask,
+    change_voice: ICON.waveform,
+    list_voices: ICON.waveform,
+    generate_anime_image: ICON.picture,
+  };
+
+  // As dynamic skills tem nome definido pelo usuario em tempo de execucao, entao
+  // uma tabela fixa nunca vai cobrir todas. Casar por pedaco do nome faz uma
+  // skill nova nascer com um icone plausivel em vez de cair sempre na engrenagem.
+  const TOOL_PATTERNS = [
+    [/screenshot|capture|print/, ICON.camera],
+    [/search|find|lookup/,       ICON.search],
+    [/fetch|browse|browser|url|http|web/, ICON.globe],
+    [/image|photo|draw|paint|art/, ICON.picture],
+    [/voice|speak|audio|tts/,    ICON.waveform],
+    [/command|shell|exec|run|bash/, ICON.terminal],
+    [/test|check|verify/,        ICON.flask],
+    [/delete|remove|drop/,       ICON.trash],
+    [/edit|update|write|patch/,  ICON.pencil],
+    [/skill|forge|create|new/,   ICON.sparkle],
+    [/see|look|watch|vision|eye/, ICON.eye],
+  ];
+
+  function iconFor(name) {
+    if (TOOL_ICONS[name]) return TOOL_ICONS[name];
+    for (const [re, icon] of TOOL_PATTERNS) if (re.test(name)) return icon;
+    return ICON.gear;
+  }
+
+  window.showToolIcon = function (name) {
+    const key = String(name == null ? '' : name).trim().toLowerCase();
+    if (!key) {
+      if (toolCue && !toolCue.out) toolCue.out = performance.now();
+      return;
+    }
+    const icon = iconFor(key);
+    if (toolCue && !toolCue.out) {
+      // Uma rodada com varias ferramentas em sequencia nao deve refazer a
+      // animacao de entrada a cada troca — a caixa fica, so o icone troca.
+      if (toolCue.icon !== icon) { toolCue.icon = icon; toolCue.swapAt = performance.now(); }
+      return;
+    }
+    toolCue = { icon, t0: performance.now(), out: 0, swapAt: 0 };
+  };
+
+  function drawToolDiamond(now) {
+    if (!toolCue) return;
+
+    // Espera o cubo do kanji sair antes de comecar a formar. Na PRIMEIRA
+    // ferramenta de cada turno o daemon dispara _cue_great_sage('ryo') e
+    // _show_tool_activity() com dois frames de diferenca (ver elfie_daemon.py,
+    // ~1456), e os dois desenham no mesmo centro — sem isso o '了' e o losango
+    // aparecem empilhados. Empurrar o t0 a cada frame deixa a entrada do
+    // losango intacta, so atrasada.
+    if (kanjiCue && !toolCue.out) { toolCue.t0 = now; return; }
+
+    const inP = Math.min(1, (now - toolCue.t0) / TOOL_FORM_MS);
+    let alpha = 1;
+    if (toolCue.out) {
+      const p = (now - toolCue.out) / TOOL_FADE_MS;
+      if (p >= 1) { toolCue = null; return; }
+      alpha = 1 - p;
+    }
+
+    const size = Math.min(W, H) * 0.155;
+    // Respiracao lenta: um web_fetch de 15s com a caixa completamente estatica
+    // fica indistinguivel de uma interface travada.
+    const breath = 1 + Math.sin(now / 620) * 0.022;
+
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.globalCompositeOperation = 'source-over';
+
+    ctx.save();
+    ctx.rotate(Math.PI / 4);
+    ctx.scale(breath, breath);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = 'rgba(4,5,9,0.94)';
+    ctx.strokeStyle = 'rgba(195,228,255,0.9)';
+    ctx.lineWidth = 2;
+    const layerH = size / TOOL_LAYERS;
+    const layers = Math.ceil(inP * TOOL_LAYERS);
+    for (let i = 0; i < layers; i++) {
+      const lp = Math.min(1, inP * TOOL_LAYERS - i);
+      const w = size * (0.25 + lp * 0.75);
+      ctx.fillRect(-w / 2, -size / 2 + i * layerH, w, layerH + 0.6);
+    }
+    if (inP > 0.35) {
+      ctx.globalAlpha = alpha * Math.min(1, (inP - 0.35) / 0.65);
+      ctx.strokeRect(-size / 2, -size / 2, size, size);
+    }
+    ctx.restore();
+
+    let iconA = alpha * Math.max(0, (inP - 0.5) / 0.5);
+    if (toolCue.swapAt) iconA *= Math.min(1, (now - toolCue.swapAt) / TOOL_SWAP_MS);
+    if (iconA > 0.01) {
+      ctx.globalAlpha = iconA;
+      ctx.strokeStyle = '#eaf4ff';
+      ctx.fillStyle = '#eaf4ff';
+      // O maior quadrado RETO que cabe num losango de lado `size` tem lado
+      // size/raiz(2); o 0.5 leva pro raio da grade -1..1 e o 0.72 e a folga
+      // pra ponta do icone nao encostar na aresta.
+      const s = (size / Math.SQRT2) * 0.5 * 0.72;
+      ctx.save();
+      ctx.scale(s, s);
+      ctx.lineWidth = 0.15;   // em unidades da grade, ja que o scale veio antes
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      toolCue.icon(ctx);
+      ctx.restore();
+    }
+
+    ctx.restore();
+  }
+
   const PHI = (1 + Math.sqrt(5)) / 2;
   const rawVerts = [
     [-1, PHI, 0], [1, PHI, 0], [-1, -PHI, 0], [1, -PHI, 0],
@@ -309,6 +549,7 @@
     ctx.restore();
 
     drawKanjiCube(nowMs);
+    drawToolDiamond(nowMs);
   }
 
   let last = performance.now();
