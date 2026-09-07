@@ -1,20 +1,55 @@
-# Elfie
+<div align="center">
 
-Elfie is an AI companion app with a persistent memory, voice conversations, dynamic skills (custom tools the AI can call or teach itself), a desktop overlay daemon for Linux and Windows, and an optional Live2D avatar. The project has a few independent pieces that work together: a mobile app, a web app, a backend API, a desktop daemon, and a Live2D overlay.
+<img src="docs/elfie.png" alt="Elfie" width="200">
+
+<h1>Elfie</h1>
+
+<p><b>An AI companion with a persistent memory, a voice, and skills she can write for herself.</b></p>
+
+<p>
+  <a href="installer/ElfieSetup.exe">
+    <img src="https://img.shields.io/badge/Download%20for%20Windows-ElfieSetup.exe-d32f2f?style=for-the-badge&amp;logo=windows&amp;logoColor=white" alt="Download for Windows">
+  </a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-8b1a2b?style=flat-square" alt="Platform: Linux and Windows">
+  <img src="https://img.shields.io/badge/Node.js-20%2B-5FA04E?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js 20+">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&amp;logo=python&amp;logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/MongoDB-required-47A248?style=flat-square&amp;logo=mongodb&amp;logoColor=white" alt="MongoDB required">
+  <img src="https://img.shields.io/badge/Vite-React-646CFF?style=flat-square&amp;logo=vite&amp;logoColor=white" alt="Vite + React">
+  <img src="https://img.shields.io/badge/Expo-React%20Native-1B1F23?style=flat-square&amp;logo=expo&amp;logoColor=white" alt="Expo / React Native">
+</p>
+
+</div>
+
+---
+
+Elfie is an AI companion app with a persistent memory, voice conversations, dynamic skills (custom tools the AI can call or teach itself), a desktop overlay daemon for Linux and Windows, and an optional Live2D avatar. The project has a few independent pieces that work together: a web app, a backend API, a desktop daemon, a companion mobile app, and a Live2D overlay.
 
 This project is open for anyone to fork, modify, and build on. There are no restrictions on changing, extending, or repurposing any part of it.
+
+## Highlights
+
+- **Persistent memory** — a knowledge base with vector search, so she remembers across conversations instead of starting cold every time.
+- **Voice, two ways** — the classic STT → LLM → TTS pipeline, and Inworld's realtime speech-to-speech for full-duplex calls.
+- **Dynamic skills** — custom tools she can call, and write for herself.
+- **Desktop overlay** — a floating indicator with global hotkeys and mic capture, on Linux (Wayland layer-shell) and Windows (WebView2).
+- **Agent tools** — web search, page fetching, vision, screenshots, a persistent browser profile she drives, and real mouse/keyboard control.
+- **Integrations** — Gmail, Calendar, Drive, Telegram, plus scheduled routines and workflows.
+- **Image generation** — PixAI for anime/manga, Nano Banana through OpenRouter.
 
 ## Project layout
 
 | Folder | What it is |
 |---|---|
-| `/` (root) | The mobile app, built with Expo / React Native. This is the primary client. |
 | `api/` | The backend: Node.js + Express + MongoDB. Handles chat, memory, voice, image generation, integrations, and the dynamic skills system. |
-| `elfie-web/` | A web client built with Vite + React, mirroring most of the mobile app's functionality in the browser. |
+| `elfie-web/` | **The main client** — a web app built with Vite + React. This is where you actually talk to Elfie. |
+| `/` (root) | A companion mobile app, built with Expo / React Native. A complement to the web app for using Elfie away from the desktop, not a replacement for it. |
 | `daemon/` | A Python background process (Linux and Windows) that shows a floating overlay indicator on the desktop, handles global hotkeys, voice capture, and an optional hand tracking mode for a "mind graph" visualization. |
 | `waifu-persona/` | A vendored Godot project (OpenVT) used to render an optional 2D Live2D avatar overlay. It has its own license and README; see `waifu-persona/README.md`. |
 
-You don't need all of these running at once. The API is required for everything else to work; the mobile app, web app, and daemon are independent clients on top of it.
+You don't need all of these running at once. The API is required for everything else to work; the web app, the daemon and the mobile app are independent clients on top of it.
 
 ## Windows: one-click installer
 
@@ -67,7 +102,7 @@ npm run dev
 
 `VITE_API_URL` in `.env` should point at your running API (defaults to `http://localhost:3000`).
 
-## 3. Mobile app (root)
+## 3. Companion mobile app (root)
 
 ```bash
 npm install

@@ -1,0 +1,77 @@
+# Recompila o ElfieSetup.exe e publica como Release sempre que um commit com
+# "deploy" na mensagem chega na main.
+#
+# Roda no ubuntu-latest com Docker, chamando o MESMO installer/build.sh usado
+# localmente, em vez de um runner windows-latest com o Inno instalado por choco:
+# um caminho de build só, então o exe publicado é gerado exatamente como o que
+# você testa na sua máquina.
+#
+# NÃO commita nada de volta no repositório. Seria conveniente manter o
+# installer/ElfieSetup.exe versionado sempre em dia por aqui, mas o commit sairia
+# como github-actions[bot] e o bot entraria na lista de contribuidores do repo —
+# exatamente o que foi limpo à mão em 2026-09-07. O binário versionado continua
+# sendo responsabilidade do build local (installer/build.sh já o atualiza).
+
+name: Release installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:      # permite disparar na mão, sem precisar de um commit
+
+permissions:
+  contents: write         # necessário para criar a Release
+
+jobs:
+  build:
+    # Comparação de string em expressão do GitHub é case-insensitive, então
+    # "deploy", "Deploy" e "deploy(feat: ...)" disparam igual.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'deploy')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar o instalador
+        run: ./installer/build.sh
+
+      - name: Conferir se o exe saiu
+        run: |
+          test -f dist/ElfieSetup.exe || { echo "::error::dist/ElfieSetup.exe não foi gerado"; exit 1; }
+          ls -lh dist/ElfieSetup.exe
+
+      - name: Ler a versão do elfie.iss
+        id: meta
+        run: |
+          version="$(sed -n 's/^#define[[:space:]]\+AppVersion[[:space:]]\+"\(.*\)"/\1/p' installer/elfie.iss)"
+          test -n "$version" || { echo "::error::AppVersion não encontrado em installer/elfie.iss"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # run_number no fim porque AppVersion é bumpado à mão: sem ele, dois
+          # deploys seguidos sem bump colidiriam na mesma tag e o segundo falharia.
+          echo "tag=v$version-build${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Publicar a Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          Instalador do Windows compilado a partir de \`${GITHUB_SHA:0:7}\`.
+
+          Baixe o \`ElfieSetup.exe\` abaixo e execute. Ele instala o servidor, o
+          aplicativo web e o daemon do overlay, junto com cópias privadas de
+          Node.js, Python, ffmpeg e MongoDB, e deixa um ícone na bandeja.
+          Não precisa de administrador (exceto um aviso do Windows para o
+          MongoDB, que dá para pular se você já tem um banco).
+
+          O Windows vai mostrar um aviso do SmartScreen porque o executável não é
+          assinado: **Mais informações → Executar assim mesmo**.
+
+          ---
+
+          $(git log -1 --pretty=%B)
+          EOF
+
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            dist/ElfieSetup.exe \
+            --title "Elfie v${{ steps.meta.outputs.version }} (build ${{ github.run_number }})" \
+            --notes-file notes.md
