@@ -1084,6 +1084,15 @@ class ElfieDaemon:
                 self._inworld_active.clear()
                 if not self._muted:
                     self._set_state('listening')
+            # Chegou aqui com tudo ainda ligado = a ligação CAIU, não terminou. O
+            # loop reconecta em ~1s e, do lado de fora, nada indicava que algo
+            # tinha acontecido: o usuário seguia falando com uma sessão nova.
+            # O cue 'warning' (som + 告 no overlay) torna a queda perceptível —
+            # o contexto é reinjetado pelo servidor, mas uma tarefa que estava
+            # em andamento no meio da queda pode ter se perdido.
+            if not self._stop.is_set() and not self._muted:
+                print('\n[elfie] inworld: a ligação caiu — reconectando', flush=True)
+                self._cue_great_sage('warning')
             time.sleep(1)
 
     def _run_inworld_session(self, api):
@@ -1124,6 +1133,9 @@ class ElfieDaemon:
         audio_clock = {'ends_at': 0.0}
         audio_burst = {'active': False}  # só pro log: marca começo/fim de rajada de audio.delta
         session_done = threading.Event()
+        # Áudio a caminho do ffplay. Fica entre a thread do websocket e a escrita
+        # bloqueante no pipe — ver o handler de audio.delta.
+        audio_q = queue.Queue()
         assistant_transcript = {'text': ''}
         tool_flow = {'started': False}
         stop_timer = {'t': None}
@@ -1312,6 +1324,42 @@ class ElfieDaemon:
                     except Exception: pass
             threading.Thread(target=_reap_killed, daemon=True, name='ffplay-kill').start()
 
+        def playback_writer():
+            """Consome a fila de áudio e escreve no ffplay. Bloquear aqui é
+            esperado e inofensivo: é uma thread só pra isso."""
+            while True:
+                chunk = audio_q.get()
+                if chunk is None:
+                    return
+                with self._play_lock:
+                    p = play_proc['p']
+                    # Chunk novo com o player anterior já fechado (closing) ou morto: é
+                    # fala NOVA começando antes da anterior acabar de tocar. O caso
+                    # 'closing' é o que quebrava tudo — o processo ainda está vivo
+                    # (poll() is None) e audível, então a checagem antiga só por
+                    # poll() caía direto no write() de um stdin fechado, estourava a
+                    # exceção lá embaixo, largava o processo antigo tocando sozinho e
+                    # abria um segundo ffplay no chunk seguinte. Mata o anterior antes.
+                    if p is not None and (play_proc['closing'] or p.poll() is not None):
+                        kill_playback_now('fala nova antes da anterior terminar')
+                        p = None
+                    if p is None:
+                        start_playback()
+                    try:
+                        p = play_proc['p']
+                        if p and p.stdin:
+                            p.stdin.write(chunk)
+                            p.stdin.flush()
+                    except Exception as ex:
+                        # Antes isso sumia em silêncio — o texto (transcript) chega por um
+                        # evento totalmente separado do áudio, então uma resposta podia
+                        # aparecer completa no log enquanto o som cortava no meio sem
+                        # nenhum aviso. Loga e derruba o player de verdade.
+                        print(f'\n[elfie] inworld: falha ao escrever áudio no ffplay: {ex}', flush=True)
+                        kill_playback_now('erro de escrita no ffplay')
+
+        threading.Thread(target=playback_writer, daemon=True, name='inworld-playback').start()
+
         def mic_sender(ws):
             # elfie_mic_aec (não 'default') — fonte virtual com AEC de verdade aplicado
             # (WebRTC, mesmo tipo do echoCancellation:true do browser), carregada em
@@ -1430,6 +1478,9 @@ class ElfieDaemon:
                 idbg('ws_in', mtype=mtype, **ids)
 
             if mtype == 'elfie.ready':
+                resumed = msg.get('resumedTurns') or 0
+                if resumed:
+                    print(f'\n[elfie] inworld: contexto restaurado ({resumed} turnos)', flush=True)
                 self._set_state('listening')
                 threading.Thread(target=mic_sender, args=(ws,), daemon=True, name='inworld-mic').start()
                 return
@@ -1535,49 +1586,29 @@ class ElfieDaemon:
                     idbg('audio_delta_burst_start')
                 cancel_scheduled_stop()
                 self._set_state('speaking')
-                # Precisa estar TODO dentro do mesmo lock que stop_playback() usa pra
-                # fechar o stdin — antes o write() rodava sem lock nenhum, então mesmo
-                # com o debounce/pending_tools no lugar, uma stop_playback() concorrente
-                # (outra thread) podia fechar o stdin bem entre o "if p and p.stdin" e o
-                # write() — dava exatamente esse "write to closed file" mesmo com tudo
-                # certo em teoria. _play_lock é RLock justamente pra start_playback()
-                # (chamado aqui dentro) poder pegar o lock de novo sem travar.
-                with self._play_lock:
-                    p = play_proc['p']
-                    # Chunk novo com o player anterior já fechado (closing) ou morto: é
-                    # fala NOVA começando antes da anterior acabar de tocar. O caso
-                    # 'closing' é o que quebrava tudo — o processo ainda está vivo
-                    # (poll() is None) e audível, então a checagem antiga só por
-                    # poll() caía direto no write() de um stdin fechado, estourava a
-                    # exceção lá embaixo, largava o processo antigo tocando sozinho e
-                    # abria um segundo ffplay no chunk seguinte. Mata o anterior antes.
-                    if p is not None and (play_proc['closing'] or p.poll() is not None):
-                        kill_playback_now('fala nova antes da anterior terminar')
-                        p = None
-                    if p is None:
-                        start_playback()
-                    try:
-                        chunk = base64.b64decode(msg['delta'])
-                        p = play_proc['p']
-                        if p and p.stdin:
-                            p.stdin.write(chunk)
-                            p.stdin.flush()
-                            # Avança o relógio de fala pelo tempo REAL que este chunk
-                            # representa. max(..., now) trata a lacuna entre respostas:
-                            # se o áudio anterior já terminou, conta a partir de agora.
-                            audio_clock['ends_at'] = (
-                                max(audio_clock['ends_at'], time.monotonic())
-                                + len(chunk) / OUTPUT_BYTES_PER_SEC
-                            )
-                    except Exception as ex:
-                        # Antes isso sumia em silêncio — o texto (transcript) chega por um
-                        # evento totalmente separado do áudio, então uma resposta podia
-                        # aparecer completa no log enquanto o som cortava no meio sem
-                        # nenhum aviso. Loga e derruba o player de verdade: só zerar o
-                        # handle (como era antes) deixava o processo vivo tocando enquanto
-                        # o gate do mic reabria na hora — autoescuta garantida.
-                        print(f'\n[elfie] inworld: falha ao escrever áudio no ffplay: {ex}', flush=True)
-                        kill_playback_now('erro de escrita no ffplay')
+                try:
+                    chunk = base64.b64decode(msg['delta'])
+                except Exception:
+                    return
+                # NÃO escreve no ffplay aqui. Este handler roda na thread LEITORA do
+                # websocket, a mesma que processa os frames de pong — e o stdin do
+                # ffplay bloqueia quando o buffer do pipe (64KB, ~1,4s de áudio)
+                # enche, o que acontece sempre, porque o TTS gera muito mais rápido
+                # que o tempo real de fala. Numa resposta longa a thread ficava
+                # presa aqui dezenas de segundos, o pong não era lido, e o
+                # ping_timeout=15 do run_forever derrubava a conexão no meio da
+                # conversa: exatamente o "ping/pong timed out" do log de 2026-09-07,
+                # depois do qual ela reconectava sem contexto nenhum.
+                #
+                # A fila desacopla: o handler volta na hora e uma thread dedicada
+                # aguenta o bloqueio. O relógio de fala avança AQUI mesmo assim —
+                # ele mede tempo de áudio enfileirado, não tempo de escrita, e o
+                # que foi enfileirado vai tocar.
+                audio_q.put(chunk)
+                audio_clock['ends_at'] = (
+                    max(audio_clock['ends_at'], time.monotonic())
+                    + len(chunk) / OUTPUT_BYTES_PER_SEC
+                )
                 return
 
             if mtype == 'response.done':
@@ -1634,6 +1665,7 @@ class ElfieDaemon:
             ws_app.run_forever(ping_interval=25, ping_timeout=15)
         finally:
             session_done.set()
+            audio_q.put(None)   # encerra a thread escritora
             # Antes do stop_playback() abaixo: com o fechamento agora agendado pro fim
             # real do áudio, um timer pendente pode ser bem longo, e ele dispararia
             # depois que a sessão já acabou (mexendo em estado/overlay de uma ligação

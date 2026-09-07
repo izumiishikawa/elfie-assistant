@@ -744,6 +744,42 @@ const TTS_SUPPORTS_STEERING = !/-flash$/.test(DEFAULT_TTS_MODEL);
 // claras antes de encerrar o turno, que é o comportamento certo pra um mic de mesa num
 // ambiente com ruído. Valores aceitos: auto | low | medium | high.
 // https://docs.inworld.ai/docs/realtime/index
+// Transcrição da chamada em andamento, no escopo do MÓDULO de propósito.
+//
+// Quando o websocket cai, o daemon reconecta em ~1s — e isso abre uma sessão
+// totalmente nova, que até agora nascia só com as `instructions`, sem uma linha
+// do que já tinha sido dito. Foi assim que, depois de um "ping/pong timed out"
+// no meio de uma tarefa, ela voltou sem contexto nenhum, entendeu "pode ser a
+// primeira opção" como outra coisa e registrou uma skill que ninguém pediu
+// (log de 2026-09-07). Guardar aqui fora é o que sobrevive à troca de conexão.
+//
+// A janela é curta porque isso é pra RECONEXÃO, não pra continuidade entre
+// ligações: uma queda volta em segundos, enquanto discar de novo dez minutos
+// depois é outra conversa e deve começar limpa.
+const RESUME_WINDOW_MS = 90_000;
+const RESUME_MAX_ITEMS = 30;
+let callTranscript = [];
+let callTranscriptAt = 0;
+
+function rememberTurn(role, text) {
+  const trimmed = (text ?? '').trim();
+  if (!trimmed) return;
+  callTranscript.push({ role, text: trimmed });
+  if (callTranscript.length > RESUME_MAX_ITEMS) {
+    callTranscript = callTranscript.slice(-RESUME_MAX_ITEMS);
+  }
+  callTranscriptAt = Date.now();
+}
+
+function transcriptToResume() {
+  if (callTranscript.length === 0) return [];
+  if (Date.now() - callTranscriptAt > RESUME_WINDOW_MS) {
+    callTranscript = [];
+    return [];
+  }
+  return callTranscript;
+}
+
 const VALID_EAGERNESS = new Set(['auto', 'low', 'medium', 'high']);
 const rawEagerness = (process.env.INWORLD_VAD_EAGERNESS || '').trim();
 const TURN_EAGERNESS = VALID_EAGERNESS.has(rawEagerness) ? rawEagerness : 'low';
@@ -974,8 +1010,29 @@ export function attachInworldRealtimeWS(httpServer) {
           },
         },
       }));
+      // Reconexão: reinjeta o que já foi dito antes da queda, como itens de
+      // conversa, ANTES de liberar o microfone. Sem isso a sessão nova começa
+      // muda de contexto e ela responde a uma frase solta do usuário como se
+      // fosse o início de tudo.
+      const resume = transcriptToResume();
+      for (const turn of resume) {
+        upstream.send(JSON.stringify({
+          type: 'conversation.item.create',
+          item: {
+            type: 'message',
+            role: turn.role,
+            content: [{ type: turn.role === 'user' ? 'input_text' : 'text', text: turn.text }],
+          },
+        }));
+      }
+      if (resume.length) {
+        console.log(`[inworldRealtime] reconexão: ${resume.length} turnos reinjetados`);
+      }
+
       if (clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(JSON.stringify({ type: 'elfie.ready', inputRate: 16000, outputRate: 24000 }));
+        clientWs.send(JSON.stringify({
+          type: 'elfie.ready', inputRate: 16000, outputRate: 24000, resumedTurns: resume.length,
+        }));
       }
     });
 
@@ -1056,6 +1113,15 @@ export function attachInworldRealtimeWS(httpServer) {
 
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
+
+      if (msg.type === 'conversation.item.input_audio_transcription.completed') {
+        rememberTurn('user', msg.transcript);
+        return;
+      }
+      if (msg.type === 'response.output_audio_transcript.done') {
+        rememberTurn('assistant', msg.transcript);
+        return;
+      }
 
       if (msg.type === 'response.output_item.added' && msg.item?.type === 'function_call') {
         // Tool nova entrando em cena: o fluxo claramente não acabou, segura o overlay.
