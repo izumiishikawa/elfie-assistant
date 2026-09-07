@@ -51,6 +51,9 @@ api/uploads/*
 # Log diagnóstico do daemon Inworld (INWORLD_DEBUG=1) — contém transcrições de voz
 daemon/inworld_debug.log
 
+# Instalador do Windows: arvore montada por installer/build.sh
+installer/build/
+
 # Overlay/daemon: caches do Python
 __pycache__/
 *.pyc

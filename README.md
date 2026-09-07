@@ -16,6 +16,20 @@ This project is open for anyone to fork, modify, and build on. There are no rest
 
 You don't need all of these running at once. The API is required for everything else to work; the mobile app, web app, and daemon are independent clients on top of it.
 
+## Windows: one-click installer
+
+If you're on Windows and just want to run Elfie rather than develop it, skip the
+manual steps below and grab `ElfieSetup.exe` from the
+[releases page](https://github.com/izumiishikawa/elfie-assistant/releases). It
+installs the API, the web app and the daemon, along with private copies of
+Node.js, Python, ffmpeg and MongoDB, and leaves a tray icon that starts and stops
+the three of them. Nothing lands on your system `PATH` and no administrator
+rights are needed (except one prompt for MongoDB, which you can skip if you
+already have a database).
+
+To build that installer yourself, see [`installer/README.md`](installer/README.md) —
+it compiles on Linux, in Docker, without Wine or a Windows machine.
+
 ## Prerequisites
 
 - Node.js 20 or newer
