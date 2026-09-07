@@ -13,6 +13,9 @@ export interface Character {
   userBasicData: string;
   longTermMemory: string[];
   greatSageWarnings: boolean;
+  inworldRealtimeEnabled: boolean;
+  inworldVoice: string;
+  inworldLLMModel: string;
 }
 
 interface SettingsStore {

@@ -27,6 +27,9 @@ const characterSchema = new Schema(
     longTermMemory: { type: [memorySchema], default: [] },
     chatSummaries: { type: [summarySchema], default: [] },
     greatSageWarnings: { type: Boolean, default: true },
+    inworldRealtimeEnabled: { type: Boolean, default: false },
+    inworldVoice: { type: String, default: '' },
+    inworldLLMModel: { type: String, default: '' },
   },
   { timestamps: { createdAt: true, updatedAt: false } },
 );

@@ -47,3 +47,13 @@ yarn-error.*
 # uploaded and generated files (voices, images, pixel art)
 api/uploads/*
 !api/uploads/.gitkeep
+
+# Log diagnóstico do daemon Inworld (INWORLD_DEBUG=1) — contém transcrições de voz
+daemon/inworld_debug.log
+
+# Overlay/daemon: caches do Python
+__pycache__/
+*.pyc
+
+# Log da sessao Inworld nova (INWORLD_CALL_DEBUG=1) — contem transcricoes de voz
+daemon/inworld_call_debug.log

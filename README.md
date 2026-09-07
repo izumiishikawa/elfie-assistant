@@ -1,6 +1,6 @@
 # Elfie
 
-Elfie is an AI companion app with a persistent memory, voice conversations, dynamic skills (custom tools the AI can call or teach itself), a desktop overlay daemon for Linux, and an optional Live2D avatar. The project has a few independent pieces that work together: a mobile app, a web app, a backend API, a desktop daemon, and a Live2D overlay.
+Elfie is an AI companion app with a persistent memory, voice conversations, dynamic skills (custom tools the AI can call or teach itself), a desktop overlay daemon for Linux and Windows, and an optional Live2D avatar. The project has a few independent pieces that work together: a mobile app, a web app, a backend API, a desktop daemon, and a Live2D overlay.
 
 This project is open for anyone to fork, modify, and build on. There are no restrictions on changing, extending, or repurposing any part of it.
 
@@ -11,7 +11,7 @@ This project is open for anyone to fork, modify, and build on. There are no rest
 | `/` (root) | The mobile app, built with Expo / React Native. This is the primary client. |
 | `api/` | The backend: Node.js + Express + MongoDB. Handles chat, memory, voice, image generation, integrations, and the dynamic skills system. |
 | `elfie-web/` | A web client built with Vite + React, mirroring most of the mobile app's functionality in the browser. |
-| `daemon/` | A Python background process for Linux that shows a floating overlay indicator on the desktop, handles global hotkeys, voice capture, and an optional hand tracking mode for a "mind graph" visualization. |
+| `daemon/` | A Python background process (Linux and Windows) that shows a floating overlay indicator on the desktop, handles global hotkeys, voice capture, and an optional hand tracking mode for a "mind graph" visualization. |
 | `waifu-persona/` | A vendored Godot project (OpenVT) used to render an optional 2D Live2D avatar overlay. It has its own license and README; see `waifu-persona/README.md`. |
 
 You don't need all of these running at once. The API is required for everything else to work; the mobile app, web app, and daemon are independent clients on top of it.
@@ -71,7 +71,13 @@ npm run android
 
 ## 4. Desktop daemon (`daemon/`)
 
-The daemon is Linux only, and specifically targets Wayland compositors with layer-shell support (Hyprland, Sway, and similar). It shows a floating overlay avatar, listens for a mute/unmute hotkey, and streams your microphone to the API for voice conversations.
+The daemon shows a floating overlay avatar, listens for a mute/unmute hotkey, and streams your microphone to the API for voice conversations. It runs on **Linux** (best on Wayland compositors with layer-shell support — Hyprland, Sway and similar) and on **Windows 10/11**. Everything OS-specific lives in `daemon/platform_compat.py`; run it directly to see what the daemon detected on your machine:
+
+```bash
+python3 daemon/platform_compat.py
+```
+
+### Linux
 
 System dependencies (package names below are for Arch Linux; adjust for your distro):
 
@@ -108,6 +114,38 @@ The "show me your mind" feature can respond to hand gestures via webcam. It's an
 cd daemon
 ./setup_hand_tracking.sh
 ```
+
+### Windows
+
+Install [ffmpeg](https://www.gyan.dev/ffmpeg/builds/) and make sure `ffmpeg.exe` and `ffplay.exe` are on your `PATH` (`ffmpeg -version` in a new terminal should work). Then:
+
+```powershell
+cd daemon
+pip install -r requirements.txt
+python elfie_daemon.py
+```
+
+`pip` picks the right extras per platform: `evdev` is skipped, and `pywebview[edgechromium]` is installed for the overlay. WebView2 ships with Windows 11 and current Windows 10; if the overlay stays blank, install the [Evergreen runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
+
+Config lives in `%APPDATA%\elfie\daemon.json` (same JSON as the Linux one).
+
+What differs from Linux, and why:
+
+| | Linux | Windows |
+|---|---|---|
+| API ↔ daemon IPC | unix socket `/tmp/elfie.sock` | TCP on `127.0.0.1`, port published to `%TEMP%\elfie\elfie.port` |
+| Global hotkeys | `evdev` (needs the `input` group) | `RegisterHotKey` via ctypes, no extra dependency and no group setup |
+| Overlay | GTK + GtkLayerShell + WebKit2 | WebView2 through pywebview, rendering the same HTML files |
+| Echo cancellation | PipeWire `elfie_mic_aec` / `elfie_speaker_aec` | none available — software mute gate only, **use headphones** |
+| Mic capture | `-f pulse` | `-f dshow` |
+| "Selected text" | X11/Wayland primary selection | the normal clipboard (Windows has no primary selection) |
+
+Two knobs, both optional:
+
+- `ELFIE_MIC_DEVICE` — pin a specific microphone. List them with `ffmpeg -list_devices true -f dshow -i dummy`; otherwise the first audio device found is used.
+- `ELFIE_DAEMON_PORT` / `ELFIE_DAEMON_ADDR` — override the IPC port (daemon side / API side).
+
+Known gaps on Windows: the overlay renders on the primary monitor only (the Linux one opens a window per monitor), and the computer-control tools still shell out to `xdotool`/`grim`, which have no Windows equivalent wired up yet.
 
 ## 5. Live2D avatar (`waifu-persona/`)
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { API_BASE } from '../constants';
 
-export type WorkflowNodeType = 'webhook' | 'schedule' | 'routine' | 'prompt' | 'condition' | 'http_request';
+export type WorkflowNodeType = 'webhook' | 'schedule' | 'routine' | 'prompt' | 'condition' | 'http_request' | 'telegram_message';
 
 export interface WorkflowNode {
   id: string;

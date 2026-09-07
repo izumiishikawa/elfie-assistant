@@ -1,5 +1,15 @@
 numpy
 requests
-evdev
 Pillow
 webrtcvad
+websocket-client
+
+# Hotkeys globais (F9/F7). Só Linux — lê /dev/input direto.
+# No Windows o daemon usa RegisterHotKey via ctypes, sem dependência nenhuma.
+evdev; sys_platform == "linux"
+
+# Overlay no Windows (emblema, legenda, mind graph, skill evolution). Renderiza
+# os mesmos HTMLs do Linux, só que no WebView2 em vez do WebKit2/GTK.
+# No Linux o overlay usa PyGObject, que se instala pelo gerenciador de pacotes
+# da distro (python-gobject + gtk3 + webkit2gtk + gtk-layer-shell), não por pip.
+pywebview[edgechromium]; sys_platform == "win32"

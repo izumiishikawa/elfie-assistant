@@ -1,17 +1,45 @@
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
 import net from 'net';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
+const IS_WINDOWS = process.platform === 'win32';
+
+// No Linux o daemon escuta num socket unix em /tmp/elfie.sock. No Windows o
+// suporte a AF_UNIX é irregular, então ele sobe um TCP no loopback e publica a
+// porta escolhida em %TEMP%\elfie\elfie.port — ver daemon/platform_compat.py.
 const SOCK_PATH = '/tmp/elfie.sock';
+const PORT_PATH = join(tmpdir(), 'elfie', 'elfie.port');
+const DEFAULT_TCP_PORT = 41907;
+
+function daemonTarget() {
+  if (process.env.ELFIE_DAEMON_ADDR) {
+    const raw = process.env.ELFIE_DAEMON_ADDR;
+    const m = /^(.*):(\d+)$/.exec(raw);
+    return m ? { host: m[1] || '127.0.0.1', port: Number(m[2]) } : { path: raw };
+  }
+  if (!IS_WINDOWS) return { path: SOCK_PATH };
+  let port = DEFAULT_TCP_PORT;
+  try {
+    const parsed = Number(readFileSync(PORT_PATH, 'utf-8').trim());
+    if (Number.isInteger(parsed) && parsed > 0) port = parsed;
+  } catch { /* daemon ainda não subiu: tenta a porta padrão */ }
+  return { host: '127.0.0.1', port };
+}
 
 export function sendToDaemon(cmd) {
   return new Promise((resolve, reject) => {
     const sock = new net.Socket();
     let buf = '';
-    sock.connect(SOCK_PATH, () => sock.write(JSON.stringify(cmd) + '\n'));
+    let settled = false;
+    const finish = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
+
+    sock.connect(daemonTarget(), () => sock.write(JSON.stringify(cmd) + '\n'));
     sock.on('data', (d) => { buf += d.toString(); });
-    sock.on('end', () => { try { resolve(JSON.parse(buf)); } catch { resolve({ ok: true }); } });
-    sock.on('error', (err) => reject(err));
-    setTimeout(() => { sock.destroy(); reject(new Error('daemon timeout')); }, 5000);
+    sock.on('end', () => { try { finish(resolve, JSON.parse(buf)); } catch { finish(resolve, { ok: true }); } });
+    sock.on('error', (err) => finish(reject, err));
+    setTimeout(() => { sock.destroy(); finish(reject, new Error('daemon timeout')); }, 5000);
   });
 }
 

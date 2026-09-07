@@ -7,6 +7,7 @@ import Settings from './models/Settings.js';
 import { runAgentTurn, loadActiveChar, generateVoiceNote } from './controllers/chats.controller.js';
 import { sendExpoPush } from './push.js';
 import { sendToDaemon } from './neuroStore.js';
+import { sendTelegramMessage } from './telegram.js';
 import { getLLMClient, getDefaultChatModel, getThinkingParams } from './llm.js';
 
 const noopSendEvent = () => {};
@@ -143,6 +144,14 @@ async function runHttpRequestNode(node, context) {
   }
 }
 
+async function runTelegramMessageNode(node, context) {
+  const data = node.data || {};
+  const text = interpolate(data.message || '', context);
+  if (!text.trim()) return { output: '' };
+  await sendTelegramMessage(text);
+  return { output: text };
+}
+
 function compareCondition(operator, actual, expected) {
   switch (operator) {
     case 'equals':
@@ -251,6 +260,10 @@ async function walkFrom(nodeId, workflow, nodesById, adjacency, context, run, vi
       conditionResult = await evaluateCondition(node, context);
       step.output = { result: conditionResult };
       context.steps[node.id] = { output: conditionResult };
+    } else if (node.type === 'telegram_message') {
+      const result = await runTelegramMessageNode(node, context);
+      step.output = truncateOutput(result.output);
+      context.steps[node.id] = result;
     }
   } catch (err) {
     step.status = 'error';

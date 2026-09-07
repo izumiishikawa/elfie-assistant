@@ -6,6 +6,8 @@ import {
   deleteCharacter,
   activateCharacter,
   updateActiveCharacterVoice,
+  exportCharacter,
+  importCharacter,
 } from '../controllers/characters.controller.js';
 
 export default (app) => {
@@ -13,6 +15,8 @@ export default (app) => {
 
   router.get('/', listCharacters);
   router.post('/', createCharacter);
+  router.post('/import', importCharacter);
+  router.get('/:id/export', exportCharacter);
   router.patch('/active/voice', updateActiveCharacterVoice);
   router.patch('/:id', updateCharacter);
   router.delete('/:id', deleteCharacter);

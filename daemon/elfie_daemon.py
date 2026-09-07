@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import base64
 import io
 import json
 import os
@@ -16,9 +17,12 @@ import threading
 import time
 import wave
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import requests
+
+import platform_compat as plat
 
 try:
     from evdev import InputDevice, ecodes, list_devices
@@ -32,22 +36,86 @@ try:
 except ImportError:
     WEBRTCVAD_OK = False
 
-CONFIG_PATH = Path.home() / '.config' / 'elfie' / 'daemon.json'
-SOCK_PATH   = '/tmp/elfie.sock'
-PID_PATH    = '/tmp/elfie.pid'
+try:
+    import websocket  # websocket-client — usado só pelo modo Inworld S2S
+    WEBSOCKET_OK = True
+except ImportError:
+    WEBSOCKET_OK = False
+
+try:
+    # Módulo autocontido (não importa nada daqui, sem risco de import circular) —
+    # ver seu docstring pro porquê de ser um arquivo separado. Mesmo guard de
+    # ImportError que 'websocket' acima: se websocket-client não estiver
+    # instalado, este import também falharia (ele importa websocket também),
+    # e _inworld_loop já sai cedo checando WEBSOCKET_OK antes de tentar usar
+    # run_inworld_call — então None aqui é seguro.
+    from elfie_inworld_call import run_inworld_call
+except ImportError:
+    run_inworld_call = None
+
+# Caminhos e IPC saem da camada de compatibilidade. No Linux dão exatamente os
+# mesmos valores de antes (/tmp/elfie.sock, /tmp/elfie.pid, ~/.config/elfie).
+CONFIG_PATH = plat.CONFIG_PATH
+SOCK_PATH   = plat.SOCK_PATH
+PID_PATH    = plat.PID_PATH
 MAX_SELECTED_TEXT_CHARS = 6000
+
+# === Log diagnóstico da sessão Inworld =======================================
+# Depois de várias rodadas de "conserto teórico -> usuário testa -> ainda quebrado",
+# parou de fazer sentido continuar advinhando pelo comportamento reportado. Isso aqui
+# registra, com timestamp, CADA decisão que afeta se o usuário é ouvido: toda mensagem
+# que chega da Inworld, toda decisão do gate do mic (silêncio ou voz, e POR QUÊ), todo
+# start/kill/reap do player de áudio. Ligado só com INWORLD_DEBUG=1 (variável de
+# ambiente do daemon, não do servidor) — em uso normal fica desligado, sem custo.
+# Vai pra ARQUIVO separado, não pro stdout: o terminal já tem o VU meter reescrevendo a
+# mesma linha com \r toda hora, um log intercalado ali seria ilegível.
+INWORLD_DEBUG = os.environ.get('INWORLD_DEBUG') == '1'
+INWORLD_DEBUG_LOG_PATH = Path(__file__).parent / 'inworld_debug.log'
+_inworld_debug_lock = threading.Lock()
+
+
+def idbg(tag: str, **fields):
+    """Loga um evento do diagnóstico Inworld. No-op se INWORLD_DEBUG não estiver setado."""
+    if not INWORLD_DEBUG:
+        return
+    ts = time.strftime('%H:%M:%S', time.localtime()) + f'.{int(time.time() * 1000) % 1000:03d}'
+    parts = ' '.join(f'{k}={v!r}' for k, v in fields.items())
+    line = f'{ts} [{tag}] {parts}\n'
+    try:
+        with _inworld_debug_lock:
+            with open(INWORLD_DEBUG_LOG_PATH, 'a') as f:
+                f.write(line)
+    except Exception:
+        pass  # log nunca pode derrubar a sessão de voz
+
+
+def _extract_ids(msg: dict) -> dict:
+    """Varre um payload de evento da Inworld atrás de qualquer campo de
+    correlação (session id, response id, event id, execution id, span id...).
+    Não presume o nome exato do campo — o suporte deles pede 'Session ID /
+    Execution ID' e 'Span ID' pra localizar a interação nos traces, e a gente
+    nunca tinha capturado nada disso (só o 'type' de cada mensagem). Olha o
+    nível de topo e um nível de aninhamento (cobre session.created's
+    `session: {id: ...}`, response.created's `response: {id: ...}`, etc.)."""
+    found = {}
+
+    def _scan(d, prefix=''):
+        if not isinstance(d, dict):
+            return
+        for k, v in d.items():
+            if k == 'id' or k.endswith('_id'):
+                key = f'{prefix}{k}' if prefix else k
+                found[key] = v
+
+    _scan(msg)
+    for k, v in msg.items():
+        if isinstance(v, dict):
+            _scan(v, prefix=f'{k}.')
+    return found
 
 
 def _get_selected_text() -> str:
-    for cmd in (['wl-paste', '--primary', '--no-newline'], ['xsel', '--primary']):
-        try:
-            out = subprocess.run(cmd, capture_output=True, timeout=0.5).stdout
-        except Exception:
-            continue
-        text = out.decode('utf-8', errors='ignore').strip()
-        if text:
-            return text[:MAX_SELECTED_TEXT_CHARS]
-    return ''
+    return plat.get_selected_text(MAX_SELECTED_TEXT_CHARS)
 
 
 def _ensure_single_instance():
@@ -59,25 +127,21 @@ def _ensure_single_instance():
         return
     if old_pid == os.getpid():
         return
-    try:
-        os.kill(old_pid, 0)
-    except OSError:
+    if not plat.pid_alive(old_pid):
         return
 
     print(f'[elfie] encerrando instância anterior (pid {old_pid})...', flush=True)
     try:
-        os.kill(old_pid, signal.SIGTERM)
+        plat.kill_pid(old_pid)
     except OSError:
         return
     for _ in range(50):
         time.sleep(0.1)
-        try:
-            os.kill(old_pid, 0)
-        except OSError:
+        if not plat.pid_alive(old_pid):
             return
     print(f'[elfie] instância anterior (pid {old_pid}) não respondeu, forçando...', flush=True)
     try:
-        os.kill(old_pid, signal.SIGKILL)
+        plat.kill_pid(old_pid, force=True)
     except OSError:
         pass
 
@@ -156,9 +220,19 @@ class ElfieDaemon:
         self._muted     = True
         self._stop      = threading.Event()
         self._busy      = threading.Event()
-        self._play_lock = threading.Lock()
+        # RLock, não Lock: o handler de audio.delta precisa segurar esse lock enquanto
+        # CHAMA start_playback() (que também toma o lock) pra ficar atômico contra
+        # stop_playback() fechando o stdin no meio — Lock comum trava (deadlock) numa
+        # reentrada assim; RLock permite a mesma thread pegar de novo.
+        self._play_lock = threading.RLock()
         self._play_proc = None
         self._session   = requests.Session()
+
+        # Modo "fast lane" Inworld S2S — ativo só quando o character ativo tem o
+        # toggle ligado (ver Character.inworldRealtimeEnabled). Enquanto ativo, o
+        # _vad_loop clássico fica em pausa (ver checagem lá embaixo) pra não
+        # transcrever/duplicar a mesma fala pelos dois caminhos.
+        self._inworld_active = threading.Event()
 
         self._blk_q = queue.Queue(maxsize=300)
         self._rec_q = queue.Queue()
@@ -170,6 +244,7 @@ class ElfieDaemon:
         self._active_overlay_proc: subprocess.Popen | None = None
         self._tool_overlay_only = False
         self._mind_overlay_proc: subprocess.Popen | None = None
+        self._skill_evolution_proc: subprocess.Popen | None = None
 
         self._draining       = threading.Event()
         self._loading_proc:  subprocess.Popen | None = None
@@ -311,6 +386,131 @@ class ElfieDaemon:
                 pass
         self._mind_overlay_proc = None
 
+    def _mic_pump(self, ws, proc, bytes_per_block, should_mute, silence_block, session_alive):
+        """Bombeia áudio de um ffmpeg de captura pro websocket do Inworld.
+
+        should_mute() decide se o bloco lido vira silêncio (ela está falando, ou o
+        usuário mutou). O stream em si NUNCA é interrompido — ver comentário no corpo.
+
+        Retorna True se chegou a mandar pelo menos um bloco — o supervisor em
+        mic_sender usa isso pra distinguir "a captura funcionou e caiu depois"
+        (reabre rápido) de "nem conseguiu começar" (reabre com backoff maior).
+        Sair daqui NÃO encerra mais a captura pra sempre: quem chamou reabre.
+        """
+        sent_any = False
+        while session_alive():
+            raw = proc.stdout.read(bytes_per_block)
+            if not raw or len(raw) < bytes_per_block:
+                return sent_any  # EOF: o ffmpeg morreu — o supervisor reabre
+            # Continua LENDO do ffmpeg mesmo mudo/falando (senão o pipe enche e trava).
+            #
+            # Quando não é pra ela ouvir, manda SILÊNCIO em vez de pular o bloco. Pular
+            # (o `continue` de antes) era metade da causa das frases alucinadas: a
+            # Inworld recebia uma linha do tempo picotada, com pedaços de fala colados
+            # sem o intervalo que existiu de verdade. STT alimentado com áudio emendado
+            # assim inventa frase — não era ela "alucinando", era a gente mandando áudio
+            # mutilado. Silêncio mantém o stream contínuo e o VAD deles vê pausa de
+            # verdade.
+            #
+            # O gate NÃO olha mais se o processo ffplay está vivo: durante uma tool call
+            # o stop_playback é adiado de propósito, então ele fica vivo e ocioso a tool
+            # inteira — era isso que fazia ela "parar de escutar depois de executar uma
+            # ferramenta". Ver o audio_clock montado em _run_inworld_session.
+            if should_mute():
+                raw = silence_block
+            # Só pra alimentar o VU do overlay — a Inworld faz o próprio VAD semântico do
+            # lado deles, isso aqui não afeta detecção de turno nenhuma.
+            if self._start_thr > 0:
+                block = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+                self._send_energy_to_overlay(min(1.0, _speech_energy(block) / self._start_thr))
+            try:
+                ws.send(json.dumps({
+                    'type': 'input_audio_buffer.append',
+                    'audio': base64.b64encode(raw).decode('ascii'),
+                }))
+                sent_any = True
+            except Exception:
+                # Websocket caiu — aí é a sessão inteira, não só a captura. Não adianta
+                # reabrir o ffmpeg; session_alive() vai ficar falso logo em seguida.
+                return sent_any
+        return sent_any
+
+    def _spawn_skill_evolution_overlay(self, line: str, skill_name: str):
+        # Fica de pé (como o 'mind') até um 'resolve' ou 'close' pelo stdin — instalar de
+        # verdade (web_fetch, test_skill, edit_skill, testar de novo) pode levar bem mais
+        # que a animação de abertura, e o usuário pediu overlay em tela o tempo todo
+        # enquanto isso roda. Guarda o proc pra _resolve_skill_evolution poder escrever
+        # nele mais tarde, quando test_skill de fato confirmar sucesso.
+        old = self._skill_evolution_proc
+        if old and old.poll() is None:
+            try:
+                old.stdin.write((json.dumps({'close': True}) + '\n').encode())
+                old.stdin.flush()
+                old.stdin.close()
+            except Exception:
+                pass
+        try:
+            script = Path(__file__).parent / 'elfie_overlay.py'
+            if not script.exists():
+                return
+            payload = json.dumps({'line': line, 'skillName': skill_name})
+            self._skill_evolution_proc = subprocess.Popen(
+                [sys.executable, str(script), 'skill_evolution', payload],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    def _resolve_skill_evolution(self, skill_name: str, success: bool):
+        proc = self._skill_evolution_proc
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            proc.stdin.write((json.dumps({'resolve': {'skillName': skill_name, 'success': success}}) + '\n').encode())
+            proc.stdin.flush()
+        except Exception:
+            pass
+
+    def _update_skill_evolution_status(self, line: str, kanji: str = ''):
+        # Reusa a mesma tela: em vez de só a animação fixa de abertura, o modelo pode
+        # empurrar avisos de progresso enquanto ainda tá trabalhando (fetch da doc, teste,
+        # ajuste) — ver window.updateStatus em skill_evolution.html e o tool
+        # forge_skill_status em chats.controller.js/inworldRealtime.js.
+        proc = self._skill_evolution_proc
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            proc.stdin.write((json.dumps({'status': {'line': line, 'kanji': kanji}}) + '\n').encode())
+            proc.stdin.flush()
+        except Exception:
+            pass
+
+    def _notice_skill_evolution(self, line: str):
+        # 告 (KOKU) toast — general announcement mid-flow, doesn't end the overlay.
+        proc = self._skill_evolution_proc
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            proc.stdin.write((json.dumps({'notice': {'line': line}}) + '\n').encode())
+            proc.stdin.flush()
+        except Exception:
+            pass
+
+    def _fail_skill_evolution(self, line: str, skill_name: str):
+        # 失敗した (SHIPAISHITA) toast — a SUB-step failed, not the whole flow (she's
+        # about to retry with edit_skill) — doesn't end the overlay, unlike
+        # skill_evolution_resolve with success=False (the terminal give-up case).
+        proc = self._skill_evolution_proc
+        if not proc or proc.poll() is not None:
+            return
+        try:
+            proc.stdin.write((json.dumps({'failure': {'line': line, 'skillName': skill_name}}) + '\n').encode())
+            proc.stdin.flush()
+        except Exception:
+            pass
+
     def _send_energy_to_overlay(self, ratio: float):
         proc = self._active_overlay_proc
         if proc and proc.poll() is None:
@@ -410,6 +610,7 @@ class ElfieDaemon:
 
     def _toggle_mute(self):
         self._muted = not self._muted
+        idbg('toggle_mute', muted=self._muted)
         if self._muted:
             self._set_state('muted')
         else:
@@ -427,19 +628,15 @@ class ElfieDaemon:
         threading.Thread(target=_post, daemon=True, name='avatar-state-notify').start()
 
     def _audio_capture_loop(self):
-        cmd = [
-            'ffmpeg', '-loglevel', 'quiet',
-            '-f', 'pulse', '-i', 'default',
-            '-ar', str(SAMPLE_RATE),
-            '-ac', '1',
-            '-f', 's16le',
-            'pipe:1',
-        ]
+        # Captura "crua" pro VU meter / wake word — no Linux vai no dispositivo
+        # default (não no elfie_mic_aec, que é só do modo Inworld).
+        cmd = plat.mic_capture_cmd(SAMPLE_RATE, device='default' if plat.IS_LINUX else None)
         bytes_per_block = BLOCK_SIZE * 2
 
         while not self._stop.is_set():
             try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                        **plat.popen_flags())
             except Exception as ex:
                 print(f'\n[elfie] erro ao abrir microfone: {ex}', flush=True)
                 time.sleep(3)
@@ -513,7 +710,7 @@ class ElfieDaemon:
                     self._set_state('listening')
                 continue
 
-            if self._muted or self._busy.is_set():
+            if self._muted or self._busy.is_set() or self._inworld_active.is_set():
                 vad_state     = 'idle'
                 hold_start    = 0.0
                 silence_start = 0.0
@@ -676,6 +873,10 @@ class ElfieDaemon:
                     if not tool_flow_started:
                         tool_flow_started = True
                         self._cue_great_sage('ryo')
+                        # Um 'started' só por stream (o servidor não manda um evento de
+                        # "tool terminou" por tool aqui) — o par sai no fim do stream,
+                        # abaixo. Cobre o buraco em que ela falava, saía do estado
+                        # 'processing' e ficava minutos numa tool em silêncio total.
                     if ev['name'] == 'web_search':
                         self._play_sfx('websearch.mp3')
                     self._show_tool_activity(ev['name'], ev.get('detail') or '')
@@ -735,6 +936,9 @@ class ElfieDaemon:
         except Exception as ex:
             print(f'\n[elfie] voice error: {ex}', flush=True)
 
+        # Fim do turno (inclusive se o stream morreu por erro): zera em vez de
+        # decrementar, porque o clássico marca um 'started' por stream e um stream
+        # cortado no meio nunca traria o par — o som ficaria tocando pra sempre.
         self._aud_q.put(None)
 
     def _playback_loop(self):
@@ -780,7 +984,8 @@ class ElfieDaemon:
 
             try:
                 proc = subprocess.Popen(
-                    ['mpg123', '-q', '-f', '22938', tmp_path],
+                    plat.mp3_play_cmd(tmp_path, volume=22938 / 32768),
+                    **plat.popen_flags(),
                 )
                 with self._play_lock:
                     self._play_proc = proc
@@ -800,6 +1005,632 @@ class ElfieDaemon:
             if self._play_proc and self._play_proc.poll() is None:
                 self._play_proc.terminate()
 
+    # -- Inworld S2S ("fast lane") ---------------------------------------------
+    # Modo alternativo de call: em vez do pipeline clássico (VAD local ->
+    # transcribe -> /api/chats/:id/voice -> mp3 -> mpg123), abre uma sessão
+    # full-duplex direto com a ponte do backend (api/src/inworldRealtime.js),
+    # que fala com a Realtime API do Inworld. Sem tools além das registradas na
+    # sessão (ver INWORLD_TOOLS + dynamic skills em inworldRealtime.js) — mesma
+    # limitação do lado web (elfie-web/src/screens/InworldCallOverlay.tsx), e sem
+    # paridade com o roster completo do chat de texto (Gmail/Calendar/Drive/Play
+    # Console/browser-agent/computer-control ficam de fora, de propósito). Nomes de evento vindos
+    # da doc do Inworld, não confirmados contra tráfego real: qualquer evento não
+    # reconhecido é só logado, nunca derruba a sessão.
+
+    def _inworld_loop(self):
+        if not WEBSOCKET_OK:
+            print('\n[elfie] websocket-client não instalado — modo Inworld desativado '
+                  '(pip3 install --break-system-packages websocket-client)', flush=True)
+            return
+
+        while not self._stop.is_set():
+            api = self.cfg.get('apiBase', 'http://localhost:3000')
+            enabled = False
+            try:
+                r = self._session.get(f'{api}/api/characters', timeout=5)
+                r.raise_for_status()
+                data  = r.json()
+                chars = data.get('characters') or []
+                active_id = str(data.get('activeCharacterId') or '')
+                active = next((c for c in chars if str(c.get('_id')) == active_id), None) \
+                    or (chars[0] if chars else None)
+                enabled = bool(active and active.get('inworldRealtimeEnabled'))
+            except Exception:
+                pass
+
+            if not enabled or self._muted or self._busy.is_set():
+                time.sleep(3)
+                continue
+
+            self._inworld_active.set()
+            try:
+                # Voltado pra versão antiga a pedido do usuário (2026-09-04) —
+                # a nova (elfie_inworld_call.py, run_inworld_call) continua no
+                # arquivo, importada e funcional, só não é chamada daqui agora.
+                # Trocar de volta é só reverter esta linha pra run_inworld_call(self, api).
+                self._run_inworld_session(api)
+            except Exception as ex:
+                print(f'\n[elfie] inworld session error: {ex}', flush=True)
+            finally:
+                self._inworld_active.clear()
+                if not self._muted:
+                    self._set_state('listening')
+            time.sleep(1)
+
+    def _run_inworld_session(self, api):
+        idbg('session_start', api=api)
+        ws_url = api.replace('https://', 'wss://').replace('http://', 'ws://') + '/ws/inworld-call'
+        # Snapshot inicial da seleção de tela — vai nas instructions do session.update
+        # (via query param), cobre "liguei já olhando pra algo". Atualizações depois disso
+        # vêm de _refresh_selection() abaixo, disparado a cada vez que a Inworld detecta
+        # que o usuário começou a falar de novo (input_audio_buffer.speech_started) — cada
+        # nova fala reconsulta a seleção atual e manda pro servidor injetar como contexto
+        # fresco, do mesmo jeito que o pipeline clássico faz a cada mensagem HTTP nova.
+        selected_text = _get_selected_text()
+        if selected_text:
+            ws_url += '?selectedText=' + quote(selected_text)
+
+        mic_proc  = {'p': None}
+        # 'closing': stop_playback() já fechou o stdin deste processo e ele está só
+        # drenando o que sobrou no buffer. Ele continua VIVO e audível nesse estado (é o
+        # ponto do -autoexit), então poll() ainda devolve None — sem esse flag não havia
+        # como distinguir "tocando e aceitando áudio novo" de "tocando o resto e já
+        # fechado", que é exatamente onde nasciam a fala sobreposta e a autoescuta.
+        play_proc = {'p': None, 'closing': False}
+        # Até quando o áudio JÁ ESCRITO no ffplay ainda está saindo pelas caixas.
+        #
+        # Isso substitui "o processo ffplay está vivo" como sinal de "ela está falando",
+        # que era simplesmente errado: durante uma tool call o stop_playback é adiado de
+        # propósito (ver on_response_done/pending_tools), então o ffplay fica VIVO e
+        # OCIOSO com o stdin aberto pela duração inteira da tool. O gate do mic olhava
+        # poll() e ficava fechado esse tempo todo — "ela para de me escutar depois que
+        # executa uma ferramenta".
+        #
+        # Como o formato de saída é fixo (PCM s16le mono 24kHz = 48000 bytes/s), dá pra
+        # saber com precisão quanto tempo de fala cada chunk representa. O acumulador usa
+        # max(ends_at, now) pra lidar com lacunas: se o áudio anterior já acabou, a
+        # contagem recomeça de agora em vez de somar em cima de um tempo já vencido.
+        OUTPUT_BYTES_PER_SEC = 24000 * 2
+        SPEECH_TAIL_S = 0.25  # margem pro buffer do sink + eco da sala
+        audio_clock = {'ends_at': 0.0}
+        audio_burst = {'active': False}  # só pro log: marca começo/fim de rajada de audio.delta
+        session_done = threading.Event()
+        assistant_transcript = {'text': ''}
+        tool_flow = {'started': False}
+        stop_timer = {'t': None}
+        last_selection = {'text': selected_text}
+        # Um turno com tool calls vira VÁRIAS respostas Inworld em sequência (response.done
+        # dispara por RODADA de tool, já confirmado — ver o fix do 'ryo' repetindo). Fechar o
+        # ffplay em CADA response.done corta e reabre o pipe de áudio entre rodadas — se a
+        # próxima rodada começar antes do ffplay antigo realmente sair (drena o buffer todo,
+        # não é instantâneo), o audio.delta seguinte tenta escrever num stdin já fechado, cai
+        # no except, zera play_proc['p'] achando que ela parou de falar enquanto o processo
+        # antigo ainda tá tocando de verdade — dois ffplay vivos ao mesmo tempo (fala
+        # sobreposta) E o mic_sender destrava cedo demais achando que ela não tá mais falando
+        # (capta a própria voz dela pelas caixas, sem AEC, manda de volta pro VAD da Inworld —
+        # loop de autoescuta).
+        #
+        # Um debounce baseado só em timer não dá conta: web_fetch/test_skill fazem requisição
+        # HTTP de verdade, podem levar vários segundos — qualquer timer curto reabre o mic
+        # achando que ela terminou enquanto uma tool ainda tá rodando; um timer longo o
+        # suficiente pra cobrir isso deixaria QUALQUER fim de turno normal (sem tool call)
+        # com vários segundos de mic mudo por nada. Em vez disso, o servidor
+        # (inworldRealtime.js, handleToolCall) avisa o daemon via elfie.tool_executing /
+        # elfie.tool_result_submitted exatamente quando uma tool está rodando de verdade —
+        # response.done só agenda o fechamento se NENHUMA tool estiver em voo; senão fica
+        # pendente até a última tool em voo terminar (pending_tools chega a 0).
+        STOP_DEBOUNCE_S = 0.6
+        pending_tools = {'count': 0}
+        response_done_pending = {'v': False}
+
+        def cancel_scheduled_stop():
+            if stop_timer['t']:
+                stop_timer['t'].cancel()
+                stop_timer['t'] = None
+
+        def finalize_stop():
+            stop_playback()
+            if not self._muted:
+                self._set_state('listening')
+
+        def schedule_stop_playback():
+            # NUNCA agenda o fechamento pra antes do áudio já bufferizado acabar de
+            # tocar. response.done (e o fim da última tool) chegam quase junto com o
+            # ÚLTIMO chunk, não com o último som: o TTS gera muito mais rápido que o
+            # tempo real de fala, então numa frase longa o ffplay pode ter 20s+ de áudio
+            # ainda por sair quando o debounce fixo de 0.6s já fechou o stdin e marcou
+            # closing=True. A partir daí, o primeiro audio.delta da rodada SEGUINTE
+            # (continuação depois de tool, ou nova resposta) caía no ramo
+            # kill_playback_now('fala nova antes da anterior terminar') e matava o
+            # processo com a frase pela metade — o SIGTERM descarta o buffer inteiro.
+            # Era exatamente isso o "ela é cortada no meio quando a frase é longa": o
+            # corte não vinha do modelo nem da rede, vinha daqui, e só aparecia em frase
+            # longa porque é onde a sobra de buffer é maior que a janela do debounce.
+            #
+            # Com o delay abaixo, o stdin só fecha quando ela está de fato inaudível —
+            # e qualquer chunk novo que chegue antes disso cancela o timer
+            # (cancel_scheduled_stop no handler de audio.delta) e é só ANEXADO no mesmo
+            # player, que é a emenda contínua e sem corte que a gente quer. O gate do
+            # mic continua saindo do audio_clock, independente deste timer.
+            remaining = audio_clock['ends_at'] + SPEECH_TAIL_S - time.monotonic()
+            delay = max(STOP_DEBOUNCE_S, remaining)
+            idbg('schedule_stop_playback', in_s=round(delay, 3),
+                 remaining_audio_s=round(remaining, 3))
+            stop_timer['t'] = threading.Timer(delay, finalize_stop)
+            stop_timer['t'].start()
+
+        def on_response_done():
+            idbg('response_done', pending_tools=pending_tools['count'])
+            if pending_tools['count'] > 0:
+                response_done_pending['v'] = True
+                return
+            schedule_stop_playback()
+
+        def start_playback():
+            with self._play_lock:
+                try:
+                    # -sample_rate/-ch_layout, não -ar/-ac: nesta versão do ffmpeg (n9.0.1+) o
+                    # demuxer raw PCM rejeita -ar/-ac com "Option not found" e o ffplay morre
+                    # sozinho sem avisar (Popen só falha se o binário nem existir, não se ele
+                    # sair logo depois com erro) — era por isso que não saía som nenhum.
+                    # -autoexit: sai sozinho assim que esvaziar o buffer após o stdin
+                    # fechar (EOF) — precisa disso porque response.done chega quase junto
+                    # do último chunk (TTS gera mais rápido que o tempo real de fala), e
+                    # SEM isso o stop_playback() tinha que decidir na hora entre matar
+                    # cedo (cortava o final de toda fala) ou nunca matar (zumbi). Com
+                    # autoexit ele mesmo termina no momento certo — ver stop_playback().
+                    # PULSE_SINK manda a saída de áudio do ffplay (SDL2, sem flag de CLI
+                    # pra dispositivo pulse) pro sink virtual com AEC (elfie_speaker_aec —
+                    # ver ~/.config/pipewire/pipewire-pulse.conf.d/51-elfie-echo-cancel.conf)
+                    # em vez do sink padrão do sistema. Precisa disso junto com o mic_sender
+                    # lendo de elfie_mic_aec (não 'default') pra o cancelamento de eco
+                    # funcionar de verdade — o módulo só cancela o que ele mesmo vê saindo
+                    # pelo sink que ele monitora.
+                    play_env = plat.playback_env()
+                    play_proc['p'] = subprocess.Popen(
+                        plat.playback_cmd(24000),
+                        stdin=subprocess.PIPE, stderr=subprocess.PIPE, env=play_env,
+                        **plat.popen_flags(),
+                    )
+                    play_proc['closing'] = False
+                    self._play_proc = play_proc['p']
+                    idbg('playback_started', pid=play_proc['p'].pid)
+
+                    # Sem isso, o stderr do ffplay (se ele morrer/reclamar de algo) vai pro
+                    # stderr herdado do daemon e pode ficar invisível, atropelado pelos \r
+                    # do redraw do VU meter no terminal — lê e imprime explícito com prefixo.
+                    proc_ref = play_proc['p']
+                    def _drain_stderr(proc):
+                        try:
+                            for line in iter(proc.stderr.readline, b''):
+                                if line.strip():
+                                    print(f"\n[elfie] ffplay: {line.decode(errors='replace').strip()}", flush=True)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_drain_stderr, args=(proc_ref,), daemon=True, name='ffplay-stderr').start()
+                except Exception as ex:
+                    idbg('playback_start_failed', error=str(ex))
+                    print(f'\n[elfie] inworld: falha ao iniciar playback: {ex}', flush=True)
+
+        def stop_playback():
+            # Só fecha o stdin (EOF) e deixa o -autoexit terminar o ffplay sozinho assim
+            # que ele acabar de tocar o que já foi escrito — NÃO chama terminate() aqui.
+            # response.done chega assim que a geração termina, bem antes do áudio já
+            # bufferizado acabar de tocar (TTS é mais rápido que tempo real); matar na
+            # hora cortava o final de toda resposta. play_proc['p'] só é limpo quando o
+            # processo realmente sai (thread reaper abaixo), então mic_sender continua
+            # mudo pelo tempo real de fala, não só até response.done.
+            with self._play_lock:
+                p = play_proc['p']
+                if not p:
+                    idbg('stop_playback_noop', reason='no active player')
+                    return
+                try: p.stdin.close()
+                except Exception: pass
+                # A partir daqui esse processo NÃO aceita mais áudio novo — qualquer
+                # chunk que chegue depois disso pertence a uma fala nova e precisa de um
+                # player novo, não de um write() num stdin fechado (ver audio.delta).
+                play_proc['closing'] = True
+                idbg('stop_playback_stdin_closed', pid=p.pid,
+                     ends_at_delta_s=round(audio_clock['ends_at'] - time.monotonic(), 3))
+
+            def _reap():
+                try: p.wait(timeout=30)
+                except Exception:
+                    try: p.terminate()
+                    except Exception: pass
+                with self._play_lock:
+                    if play_proc['p'] is p:
+                        play_proc['p'] = None
+                        play_proc['closing'] = False
+                    if self._play_proc is p:
+                        self._play_proc = None
+                idbg('playback_reaped', pid=p.pid)
+            threading.Thread(target=_reap, daemon=True, name='ffplay-reap').start()
+
+        def kill_playback_now(reason: str):
+            # Corte IMEDIATO, ao contrário de stop_playback() (que fecha o stdin e deixa
+            # o -autoexit drenar): usado quando uma fala NOVA precisa começar enquanto a
+            # anterior ainda está audível. Sem isso, o handler de audio.delta abria um
+            # segundo ffplay por cima do primeiro — os dois tocando juntos era ela
+            # "falando por cima dela mesma", e como o handle antigo era descartado sem o
+            # processo morrer, o gate do mic reabria no meio da fala dela e ela se
+            # escutava. Limpa o estado sob o lock e manda SIGTERM de forma síncrona
+            # (terminate() não bloqueia), deixando só o wait() pra thread.
+            with self._play_lock:
+                p = play_proc['p']
+                if not p:
+                    return
+                play_proc['p'] = None
+                play_proc['closing'] = False
+                if self._play_proc is p:
+                    self._play_proc = None
+                try: p.stdin.close()
+                except Exception: pass
+                try: p.terminate()
+                except Exception: pass
+                # O áudio que ainda estava bufferizado foi descartado junto com o
+                # processo — ela para de ser audível AGORA, então o relógio de fala não
+                # pode continuar apontando pro futuro (manteria o mic fechado à toa).
+                audio_clock['ends_at'] = time.monotonic()
+            idbg('playback_killed', pid=p.pid, reason=reason)
+            print(f'\n[elfie] inworld: playback anterior cortado ({reason})', flush=True)
+
+            def _reap_killed():
+                try: p.wait(timeout=5)
+                except Exception:
+                    try: p.kill()
+                    except Exception: pass
+            threading.Thread(target=_reap_killed, daemon=True, name='ffplay-kill').start()
+
+        def mic_sender(ws):
+            # elfie_mic_aec (não 'default') — fonte virtual com AEC de verdade aplicado
+            # (WebRTC, mesmo tipo do echoCancellation:true do browser), carregada em
+            # ~/.config/pipewire/pipewire-pulse.conf.d/51-elfie-echo-cancel.conf. Antes
+            # disso, a única defesa contra a Elfie se ouvir era o gate abaixo (mudo
+            # enquanto play_proc['p'] existe) — funcionava na maioria dos casos, mas
+            # qualquer imprecisão de timing (latência de buffer, eco de sala) ainda
+            # vazava. Isso ataca a causa raiz em vez de tentar cronometrar melhor.
+            #
+            # SUPERVISIONADO: antes isso abria o ffmpeg UMA vez e, se ele morresse, o
+            # `break` do read curto (EOF) saía do while e a thread ACABAVA — pra sempre.
+            # A sessão continuava conectada, o terminal continuava mostrando "ouvindo..."
+            # (aquele VU vem do _audio_capture_loop, que é outra captura, independente
+            # desta), mas NENHUM áudio era mandado pro Inworld nunca mais. Exatamente o
+            # "ela para de me escutar do nada", sem uma linha de erro no log — porque o
+            # stderr do ffmpeg ia pra DEVNULL.
+            #
+            # E o ffmpeg morrer aqui não é raro: elfie_mic_aec é uma source VIRTUAL do
+            # module-echo-cancel carregado sem master explícito (ver
+            # 51-elfie-echo-cancel.conf), então ela segue os dispositivos default. Quando
+            # o PipeWire suspende um device ocioso, ou o default muda, a source virtual é
+            # destruída e recriada — e quem estava lendo dela leva EOF.
+            bytes_per_block = BLOCK_SIZE * 2
+            backoff = 0.5
+            silence_block = b'\x00' * bytes_per_block
+
+            _mute_state = {'v': None}  # None força o primeiro log a sempre disparar
+
+            def _should_mute():
+                # Ela é audível enquanto o áudio já escrito no ffplay ainda estiver
+                # soando (audio_clock) — NÃO enquanto o processo existir.
+                now = time.monotonic()
+                muted_by_user = self._muted
+                muted_by_speech = now < audio_clock['ends_at'] + SPEECH_TAIL_S
+                v = muted_by_user or muted_by_speech
+                # Loga só nas TRANSIÇÕES, não a cada bloco (seriam ~25/s) — senão o log
+                # vira ruído do mesmo jeito que a falta dele era cega.
+                if v != _mute_state['v']:
+                    _mute_state['v'] = v
+                    idbg('mic_gate', muted=v, by_user=muted_by_user, by_speech=muted_by_speech,
+                         speech_ends_in_s=round(audio_clock['ends_at'] + SPEECH_TAIL_S - now, 3))
+                return v
+
+            def _session_alive():
+                return (not session_done.is_set() and not self._stop.is_set()
+                        and self._inworld_active.is_set())
+
+            while _session_alive():
+                cmd = plat.mic_capture_cmd(SAMPLE_RATE)
+                try:
+                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            **plat.popen_flags())
+                except Exception as ex:
+                    idbg('mic_open_failed', error=str(ex))
+                    print(f'\n[elfie] inworld: falha ao abrir microfone: {ex}', flush=True)
+                    return
+                mic_proc['p'] = proc
+                idbg('mic_opened', pid=proc.pid)
+
+                # stderr NÃO vai mais pra DEVNULL: era por isso que a captura morria em
+                # silêncio absoluto. Agora qualquer reclamação do ffmpeg aparece no log.
+                def _drain_mic_stderr(p):
+                    try:
+                        for line in iter(p.stderr.readline, b''):
+                            if line.strip():
+                                print(f"\n[elfie] mic ffmpeg: {line.decode(errors='replace').strip()}", flush=True)
+                    except Exception:
+                        pass
+                threading.Thread(target=_drain_mic_stderr, args=(proc,), daemon=True,
+                                 name='inworld-mic-stderr').start()
+
+                sent_any = self._mic_pump(ws, proc, bytes_per_block, _should_mute,
+                                          silence_block, _session_alive)
+                idbg('mic_pump_returned', pid=proc.pid, sent_any=sent_any, session_alive=_session_alive())
+
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                except Exception:
+                    try: proc.kill()
+                    except Exception: pass
+
+                if not _session_alive():
+                    break
+                # Chegou aqui com a sessão ainda viva = a captura caiu sozinha. Reabre.
+                idbg('mic_reopening', backoff_s=backoff, sent_any=sent_any)
+                print(f'\n[elfie] inworld: captura de microfone caiu, reabrindo em {backoff:.1f}s', flush=True)
+                time.sleep(backoff)
+                # Backoff só cresce quando a reabertura falha na hora (source sumiu de
+                # vez); se chegou a mandar áudio, foi uma queda pontual e o próximo
+                # restart volta a ser rápido.
+                backoff = 0.5 if sent_any else min(backoff * 2, 5.0)
+
+        def on_open(ws):
+            print('\n[elfie] inworld: conectado', flush=True)
+
+        def on_message(ws, message):
+            try:
+                msg = json.loads(message)
+            except Exception:
+                return
+            mtype = msg.get('type', '')
+
+            # Todo tipo de mensagem, MENOS audio.delta (esse tem log próprio — só
+            # começo/fim de rajada, senão seriam dezenas por segundo de linha idêntica).
+            if not mtype.endswith('audio.delta'):
+                if audio_burst['active']:
+                    audio_burst['active'] = False
+                    idbg('audio_delta_burst_end', ends_at_delta_s=round(audio_clock['ends_at'] - time.monotonic(), 3))
+                # O suporte da Inworld pede Session ID/Execution ID/Span ID pra
+                # localizar a interação nos traces deles — a gente nunca logou isso,
+                # só o 'type' de cada mensagem. _extract_ids varre o payload inteiro
+                # (topo + um nível de aninhamento) atrás de qualquer campo 'id' ou
+                # que termine em '_id', sem presumir o nome exato do campo deles.
+                ids = _extract_ids(msg)
+                idbg('ws_in', mtype=mtype, **ids)
+
+            if mtype == 'elfie.ready':
+                self._set_state('listening')
+                threading.Thread(target=mic_sender, args=(ws,), daemon=True, name='inworld-mic').start()
+                return
+
+            if mtype == 'error':
+                # Erro nativo do Inworld vem aninhado em error.{message,code,type}, igual ao
+                # protocolo da OpenAI — não é campo message na raiz (isso é só pros erros que
+                # o nosso próprio backend sintetiza, ex.: falta INWORLD_API_KEY).
+                err = msg.get('error') or {}
+                detail = msg.get('message') or err.get('message') or json.dumps(err or msg, ensure_ascii=False)
+                idbg('inworld_error', detail=detail)
+                print(f'\n[elfie] inworld error: {detail}', flush=True)
+                return
+
+            if mtype == 'conversation.item.input_audio_transcription.completed':
+                # Novo pedido do usuário = novo "flow" pra fins do cue 'ryo' — não dá pra
+                # resetar isso em response.done (tentei, era o bug): a Inworld manda um
+                # response.done por RODADA de tool, não um só pro turno inteiro como o
+                # pipeline clássico (lá é uma stream SSE contínua até a resposta final).
+                # Resetando em response.done, cada tool subsequente no mesmo turno também
+                # tocava 'ryo' de novo, em vez de só a primeira.
+                tool_flow['started'] = False
+                text = (msg.get('transcript') or '').strip()
+                idbg('user_transcript', text=text)
+                if text:
+                    print(f'\n[elfie] inworld (você disse): {text}', flush=True)
+                return
+
+            if mtype == 'response.output_audio_transcript.delta':
+                assistant_transcript['text'] += msg.get('delta') or ''
+                return
+
+            if mtype == 'response.output_audio_transcript.done':
+                text = (msg.get('transcript') or assistant_transcript['text']).strip()
+                assistant_transcript['text'] = ''
+                if text:
+                    print(f'\n[elfie] inworld (ela disse): {text}', flush=True)
+                return
+
+            # response.output_item.added carrega o nome da tool quando item.type ==
+            # 'function_call' — é o único ponto do protocolo onde o nome aparece (os
+            # eventos .delta/.done de argumentos, abaixo, só têm call_id). Usa isso pra
+            # acender o mesmo cue sonoro/kanji que o pipeline clássico dispara em
+            # _process_voice_stream (linha ~688) — antes a Inworld não tocava nem
+            # websearch.mp3 nem o cue 'ryo' porque esse evento caía direto no
+            # ignore-list abaixo, igual todo o resto do housekeeping do protocolo.
+            if mtype == 'response.output_item.added':
+                item = msg.get('item') or {}
+                if item.get('type') == 'function_call':
+                    name = item.get('name') or ''
+                    if not tool_flow['started']:
+                        tool_flow['started'] = True
+                        self._cue_great_sage('ryo')
+                    if name == 'web_search':
+                        self._play_sfx('websearch.mp3')
+                    self._show_tool_activity(name, '')
+                return
+
+            if mtype == 'input_audio_buffer.speech_started':
+                # Usuário começou a falar de novo — reconsulta a seleção de tela AGORA
+                # (não só uma vez no início da chamada) e manda pro servidor injetar como
+                # contexto fresco, se for diferente do que já mandamos. _get_selected_text
+                # faz subprocess (wl-paste/xsel), roda numa thread separada pra não travar
+                # esse handler de mensagem.
+                def _refresh_selection():
+                    text = _get_selected_text()
+                    if text and text != last_selection['text']:
+                        last_selection['text'] = text
+                        try:
+                            ws.send(json.dumps({'type': 'elfie.selection_update', 'text': text}))
+                        except Exception:
+                            pass
+                threading.Thread(target=_refresh_selection, daemon=True, name='selection-refresh').start()
+                idbg('speech_started')
+                return
+
+            # Housekeeping do protocolo (confirmado em tráfego real 2026-09-04) que não
+            # precisa de ação nossa: ciclo de sessão, VAD do lado deles, o eco item-a-item
+            # da conversa, e a estrutura da resposta (item/content-part/output_text —
+            # já cobrimos o que interessa via audio_transcript acima). Silenciado pra não
+            # poluir o log; só o que a gente NÃO reconhece ainda cai no catch-all lá embaixo.
+            if mtype in (
+                'session.created', 'session.updated',
+                'input_audio_buffer.speech_stopped',
+                'input_audio_buffer.committed', 'input_audio_buffer.turn_suggestion',
+                'conversation.item.added', 'conversation.item.done',
+                'conversation.item.input_audio_transcription.delta',
+                'response.created', 'response.output_item.done',
+                'response.content_part.added', 'response.content_part.done',
+                'response.output_text.done', 'response.output_audio.done',
+                # Ciclo de tool calling — a execução real acontece no lado do servidor
+                # (api/src/inworldRealtime.js), o daemon só ecoa esses eventos sem
+                # precisar agir. Adicionados quando web_search/execute_command/etc. e
+                # os dynamic skills entraram (2026-09-04) — antes só list_voices/
+                # change_voice existiam e quase nunca disparavam esse ciclo.
+                'response.function_call_arguments.delta', 'response.function_call_arguments.done',
+            ):
+                return
+
+            if mtype.endswith('audio.delta') and msg.get('delta'):
+                if not audio_burst['active']:
+                    audio_burst['active'] = True
+                    idbg('audio_delta_burst_start')
+                cancel_scheduled_stop()
+                self._set_state('speaking')
+                # Precisa estar TODO dentro do mesmo lock que stop_playback() usa pra
+                # fechar o stdin — antes o write() rodava sem lock nenhum, então mesmo
+                # com o debounce/pending_tools no lugar, uma stop_playback() concorrente
+                # (outra thread) podia fechar o stdin bem entre o "if p and p.stdin" e o
+                # write() — dava exatamente esse "write to closed file" mesmo com tudo
+                # certo em teoria. _play_lock é RLock justamente pra start_playback()
+                # (chamado aqui dentro) poder pegar o lock de novo sem travar.
+                with self._play_lock:
+                    p = play_proc['p']
+                    # Chunk novo com o player anterior já fechado (closing) ou morto: é
+                    # fala NOVA começando antes da anterior acabar de tocar. O caso
+                    # 'closing' é o que quebrava tudo — o processo ainda está vivo
+                    # (poll() is None) e audível, então a checagem antiga só por
+                    # poll() caía direto no write() de um stdin fechado, estourava a
+                    # exceção lá embaixo, largava o processo antigo tocando sozinho e
+                    # abria um segundo ffplay no chunk seguinte. Mata o anterior antes.
+                    if p is not None and (play_proc['closing'] or p.poll() is not None):
+                        kill_playback_now('fala nova antes da anterior terminar')
+                        p = None
+                    if p is None:
+                        start_playback()
+                    try:
+                        chunk = base64.b64decode(msg['delta'])
+                        p = play_proc['p']
+                        if p and p.stdin:
+                            p.stdin.write(chunk)
+                            p.stdin.flush()
+                            # Avança o relógio de fala pelo tempo REAL que este chunk
+                            # representa. max(..., now) trata a lacuna entre respostas:
+                            # se o áudio anterior já terminou, conta a partir de agora.
+                            audio_clock['ends_at'] = (
+                                max(audio_clock['ends_at'], time.monotonic())
+                                + len(chunk) / OUTPUT_BYTES_PER_SEC
+                            )
+                    except Exception as ex:
+                        # Antes isso sumia em silêncio — o texto (transcript) chega por um
+                        # evento totalmente separado do áudio, então uma resposta podia
+                        # aparecer completa no log enquanto o som cortava no meio sem
+                        # nenhum aviso. Loga e derruba o player de verdade: só zerar o
+                        # handle (como era antes) deixava o processo vivo tocando enquanto
+                        # o gate do mic reabria na hora — autoescuta garantida.
+                        print(f'\n[elfie] inworld: falha ao escrever áudio no ffplay: {ex}', flush=True)
+                        kill_playback_now('erro de escrita no ffplay')
+                return
+
+            if mtype == 'response.done':
+                # NÃO chama stop_playback()/schedule diretamente, e NÃO reseta
+                # tool_flow['started'] — a Inworld manda response.done uma vez por RODADA de
+                # tool, não uma vez pro turno inteiro (confirmado ao vivo). on_response_done()
+                # só agenda o fechamento se nenhuma tool estiver realmente em voo agora (ver
+                # elfie.tool_executing/elfie.tool_result_submitted abaixo) — senão fica
+                # pendente até a última tool em voo terminar. tool_flow reseta em
+                # conversation.item.input_audio_transcription.completed.
+                self._clear_tool_activity()
+                on_response_done()
+                return
+
+            if mtype == 'elfie.tool_executing':
+                # Servidor avisa que uma tool está executando de verdade AGORA (pode ser
+                # request HTTP real — web_fetch, test_skill — levando vários segundos).
+                # Cancela qualquer fechamento agendado: sabemos que mais áudio vem depois.
+                pending_tools['count'] += 1
+                idbg('tool_executing', tool=msg.get('name'), pending_tools=pending_tools['count'])
+                cancel_scheduled_stop()
+                return
+
+            if mtype == 'elfie.tool_result_submitted':
+                pending_tools['count'] = max(0, pending_tools['count'] - 1)
+                idbg('tool_result_submitted', tool=msg.get('name'), pending_tools=pending_tools['count'],
+                     response_done_pending=response_done_pending['v'])
+                if pending_tools['count'] == 0 and response_done_pending['v']:
+                    response_done_pending['v'] = False
+                    schedule_stop_playback()
+                return
+
+            print(f'[elfie] inworld: evento não tratado: {mtype}', flush=True)
+
+        def on_error(ws, error):
+            idbg('ws_error', error=str(error))
+            print(f'\n[elfie] inworld ws error: {error}', flush=True)
+
+        def on_close(ws, *_args):
+            idbg('ws_close')
+            session_done.set()
+
+        ws_app = websocket.WebSocketApp(
+            ws_url, on_open=on_open, on_message=on_message, on_error=on_error, on_close=on_close,
+        )
+
+        try:
+            # ping_timeout mais folgado (era 10s): o servidor agora manda ping ativo a
+            # cada 12s dos dois lados (ver HEARTBEAT_MS em inworldRealtime.js) — suspeita
+            # forte de que era a Inworld (ou algo no meio do caminho) derrubando por
+            # inatividade durante uma tool call real (web_fetch/test_skill podem levar
+            # até ~15s numa API de verdade), o que em cascata matava essa conexão
+            # também. Isso é margem de segurança extra, não a correção principal.
+            ws_app.run_forever(ping_interval=25, ping_timeout=15)
+        finally:
+            session_done.set()
+            # Antes do stop_playback() abaixo: com o fechamento agora agendado pro fim
+            # real do áudio, um timer pendente pode ser bem longo, e ele dispararia
+            # depois que a sessão já acabou (mexendo em estado/overlay de uma ligação
+            # que não existe mais).
+            cancel_scheduled_stop()
+            p = mic_proc['p']
+            if p and p.poll() is None:
+                try:
+                    p.terminate()
+                    p.wait(timeout=2)
+                except Exception:
+                    try: p.kill()
+                    except Exception: pass
+            stop_playback()
+            # stop_playback() só AGENDA o fechamento (thread reaper assíncrona) — sem
+            # esperar de verdade aqui, uma reconexão rápida (comum logo depois de um
+            # "ping/pong timed out") podia começar a sessão SEGUINTE enquanto o ffplay
+            # da sessão anterior ainda tava tocando/segurando o sink de AEC, ou com
+            # play_proc ainda não limpo — um dos jeitos reais dela acabar se escutando
+            # bem na hora de uma reconexão. Espera até ~3s o reaper terminar antes de
+            # devolver o controle pro _inworld_loop reconectar.
+            for _ in range(60):
+                if play_proc['p'] is None:
+                    break
+                time.sleep(0.05)
+
     def _play_sfx(self, filename: str, volume: float = 1.0):
         path = Path(__file__).parent / filename
         if not path.exists():
@@ -808,8 +1639,9 @@ class ElfieDaemon:
         def _run():
             try:
                 subprocess.Popen(
-                    ['mpg123', '-q', '-f', str(scale), str(path)],
+                    plat.mp3_play_cmd(path, volume=volume),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    **plat.popen_flags(),
                 ).wait()
             except Exception:
                 pass
@@ -824,8 +1656,9 @@ class ElfieDaemon:
                 return
             try:
                 self._loading_proc = subprocess.Popen(
-                    ['mpg123', '-q', '--loop', '-1', '-f', '16384', str(path)],
+                    plat.mp3_play_cmd(path, volume=0.5, loop=True),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    **plat.popen_flags(),
                 )
             except Exception:
                 pass
@@ -851,7 +1684,7 @@ class ElfieDaemon:
                 session = self._neuro_sessions.get(chat_id)
             if session and session['proc'].poll() is None:
                 try:
-                    session['proc'].send_signal(signal.SIGINT)
+                    plat.interrupt_process(session['proc'])
                     session['discarding'] = True
                 except Exception:
                     pass
@@ -871,7 +1704,7 @@ class ElfieDaemon:
                     return session
                 del self._neuro_sessions[chat_id]
 
-            session_dir = Path(f'/tmp/neuro-{chat_id}')
+            session_dir = plat.session_dir(f'neuro-{chat_id}')
             session_dir.mkdir(parents=True, exist_ok=True)
 
             claude_md = session_dir / 'CLAUDE.md'
@@ -897,6 +1730,9 @@ class ElfieDaemon:
                 text=True,
                 bufsize=1,
                 cwd=str(session_dir),
+                # Grupo próprio no Windows: sem isso o CTRL_BREAK do
+                # interrupt_process() não tem como chegar só nele.
+                **plat.new_process_group(),
             )
 
             session = {
@@ -1081,8 +1917,8 @@ class ElfieDaemon:
             return {'error': 'no active session'}
         session['discarding'] = True
         try:
-            session['proc'].send_signal(signal.SIGINT)
-            print(f'\n[neuro:{chat_id[:8]}] SIGINT sent', flush=True)
+            plat.interrupt_process(session['proc'])
+            print(f'\n[neuro:{chat_id[:8]}] interrupção enviada', flush=True)
         except Exception as ex:
             return {'error': f'interrupt failed: {ex}'}
         return {'ok': True}
@@ -1150,7 +1986,8 @@ class ElfieDaemon:
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
-                cwd='/tmp',
+                cwd=str(plat.runtime_dir()),
+                **plat.new_process_group(),
             )
             log(f'claude PID: {proc.pid}')
 
@@ -1262,9 +2099,28 @@ class ElfieDaemon:
             print(f'\n[neuro:{tid}] worker exception: {ex}', flush=True)
             post_event({'type': 'neuro_done', 'text': f'Erro: {ex}', 'error': True})
 
+    def _on_hotkey_f9(self):
+        if not self._muted:
+            self._stop_playback()
+        self._toggle_mute()
+        self._play_sfx('toggle.mp3', volume=0.6)
+
+    def _on_hotkey_f7(self):
+        self._interrupt_response()
+
     def _hotkey_loop(self):
-        if not EVDEV_OK:
-            print('\n[elfie] evdev não instalado — F9 desabilitado', flush=True)
+        backend = plat.hotkey_backend()
+
+        if backend == 'win32':
+            plat.run_windows_hotkeys(
+                {'F9': self._on_hotkey_f9, 'F7': self._on_hotkey_f7},
+                lambda: self._stop.is_set(),
+            )
+            return
+
+        if backend != 'evdev':
+            print('\n[elfie] sem backend de hotkey nesta plataforma — F9/F7 desabilitados',
+                  flush=True)
             return
 
         keyboards = []
@@ -1299,12 +2155,9 @@ class ElfieDaemon:
                     for event in fds[fd].read():
                         if event.type == ecodes.EV_KEY and event.value == 1:
                             if event.code == ecodes.KEY_F9:
-                                if not self._muted:
-                                    self._stop_playback()
-                                self._toggle_mute()
-                                self._play_sfx('toggle.mp3', volume=0.6)
+                                self._on_hotkey_f9()
                             elif event.code == ecodes.KEY_F7:
-                                self._interrupt_response()
+                                self._on_hotkey_f7()
                 except Exception:
                     pass
 
@@ -1315,13 +2168,9 @@ class ElfieDaemon:
                 pass
 
     def _ipc_loop(self):
-        if os.path.exists(SOCK_PATH):
-            os.unlink(SOCK_PATH)
-
-        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        srv.bind(SOCK_PATH)
-        srv.listen(5)
+        srv = plat.create_ipc_server(5)
         srv.settimeout(1.0)
+        print(f'[elfie] IPC escutando em {plat.ipc_address_label()}', flush=True)
 
         while not self._stop.is_set():
             try:
@@ -1450,6 +2299,54 @@ class ElfieDaemon:
             self._cue_great_sage(cue)
             return {'ok': True}
 
+        if action == 'skill_evolution':
+            line = cmd.get('line', '').strip()
+            skill_name = cmd.get('skillName', '').strip()
+            if self._great_sage_enabled():
+                self._play_sfx('warning.mp3')  # 告 (KOKU) — toca já no início do beat de abertura
+            threading.Thread(
+                target=self._spawn_skill_evolution_overlay,
+                args=(line, skill_name),
+                daemon=True,
+                name='skill-evolution-overlay',
+            ).start()
+            return {'ok': True}
+
+        if action == 'skill_evolution_resolve':
+            skill_name = cmd.get('skillName', '').strip()
+            success = bool(cmd.get('success', True))
+            # Ainda usando ryo.mp3 pro beat de fechamento (是/ZE) — não existe ze.mp3
+            # dedicado. Dispara exatamente quando test_skill de fato confirma sucesso
+            # (ver forge_skill/test_skill em chats.controller.js e inworldRealtime.js),
+            # não num timer chutado — o loop de teste pode levar segundos ou minutos.
+            if self._great_sage_enabled():
+                self._play_sfx('ryo.mp3')
+            self._resolve_skill_evolution(skill_name, success)
+            return {'ok': True}
+
+        if action == 'skill_evolution_status':
+            line = cmd.get('line', '').strip()
+            kanji = cmd.get('kanji', '').strip()
+            self._update_skill_evolution_status(line, kanji)
+            return {'ok': True}
+
+        if action == 'skill_evolution_notice':
+            line = cmd.get('line', '').strip()
+            if self._great_sage_enabled():
+                self._play_sfx('warning.mp3')  # 告 (KOKU), same cue as forge_skill's opening beat
+            self._notice_skill_evolution(line)
+            return {'ok': True}
+
+        if action == 'skill_evolution_failure':
+            line = cmd.get('line', '').strip()
+            skill_name = cmd.get('skillName', '').strip()
+            # Sem asset de som dedicado a erro — neurooff.mp3 já soa como "algo parou/
+            # abortou", encaixa melhor que reusar ryo/warning aqui.
+            if self._great_sage_enabled():
+                self._play_sfx('neurooff.mp3')
+            self._fail_skill_evolution(line, skill_name)
+            return {'ok': True}
+
         if action == 'play_audio':
             filename = cmd.get('filename', '').strip()
             if not filename:
@@ -1470,6 +2367,7 @@ class ElfieDaemon:
             threading.Thread(target=self._vad_loop,           daemon=True, name='vad'),
             threading.Thread(target=self._transcribe_loop,    daemon=True, name='transcribe'),
             threading.Thread(target=self._playback_loop,      daemon=True, name='playback'),
+            threading.Thread(target=self._inworld_loop,       daemon=True, name='inworld'),
             threading.Thread(target=self._hotkey_loop,        daemon=True, name='hotkey'),
             threading.Thread(target=self._ipc_loop,           daemon=True, name='ipc'),
         ]
@@ -1487,6 +2385,7 @@ class ElfieDaemon:
             os.unlink(PID_PATH)
         except OSError:
             pass
+        plat.cleanup_ipc()
 
 
 def main():
@@ -1508,7 +2407,17 @@ def main():
     print(f'[elfie] chat:   {chat or "(não configurado — use: elfie switch <chatId>)"}')
     print(f'[elfie] F9    = toggle mute/unmute')
     print(f'[elfie] F7    = interromper resposta atual')
-    print(f'[elfie] socket: {SOCK_PATH}')
+    print(f'[elfie] ipc:    {plat.ipc_address_label()}')
+    print(f'[elfie] ambiente: {plat.describe_environment()}')
+
+    for tool in ('ffmpeg', 'ffplay'):
+        if not plat.which(tool):
+            print(f'[elfie] AVISO: {tool} não está no PATH — áudio não vai funcionar.')
+    if plat.hotkey_backend() == 'none':
+        print('[elfie] AVISO: sem backend de hotkey — F9/F7 desabilitados.')
+    if not plat.has_echo_cancellation():
+        print('[elfie] nota: sem cancelamento de eco do sistema nesta plataforma; '
+              'usando só o gate por software (use fone pra evitar que ela se ouça).')
     print()
 
     ElfieDaemon().run()

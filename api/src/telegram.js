@@ -115,6 +115,15 @@ async function transcribeTelegramVoice(token, fileId) {
   return transcribe(buffer, 'pt', 'audio/ogg', 'voice.ogg');
 }
 
+export async function sendTelegramMessage(text) {
+  const token = _settings.telegramBotToken?.trim();
+  const chatId = _settings.telegramOwnerId;
+  if (!token || !chatId) throw new Error('Telegram não está configurado (bot token ausente ou nenhum usuário vinculado)');
+  for (const chunk of chunkText(text, TELEGRAM_TEXT_LIMIT)) {
+    await tgApi(token, 'sendMessage', { chat_id: chatId, text: chunk });
+  }
+}
+
 async function deliverAssistantMessage(token, chatId, m, { respondAsVoice = false, voiceId = '' } = {}) {
   if (m.content?.trim()) {
     if (respondAsVoice) {

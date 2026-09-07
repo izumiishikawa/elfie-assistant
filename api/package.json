@@ -1,7 +1,7 @@
 {
   "name": "elfie-api",
   "version": "1.0.0",
-  "description": "Elfie AI Companion — backend API",
+  "description": "Elfie AI Companion \u2014 backend API",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -16,6 +16,7 @@
     "@xenova/transformers": "^2.17.2",
     "ai": "^6.0.208",
     "apache-arrow": "^18.1.0",
+    "bson": "^7.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
@@ -25,6 +26,7 @@
     "openai": "^6.39.1",
     "playwright": "^1.62.1",
     "sharp": "^0.32.6",
+    "tar-stream": "^3.2.0",
     "ws": "^8.21.0",
     "zod": "^4.4.3"
   },

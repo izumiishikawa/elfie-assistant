@@ -8,6 +8,7 @@ import { setLLMSettings } from '../llm.js';
 import { setVoiceSettings } from '../voice.js';
 import { setGoogleAuthSettings } from '../googleAuth.js';
 import { setTelegramSettings } from '../telegram.js';
+import { setPixaiSettings } from '../pixai.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const uploadDir = resolve(__dirname, '..', '..', 'uploads');
@@ -56,10 +57,28 @@ export async function updateSettings(req, res) {
     if (req.body.llmProvider !== undefined) patch.llmProvider = req.body.llmProvider;
     if (req.body.deepseekApiKey !== undefined) patch.deepseekApiKey = req.body.deepseekApiKey;
     if (req.body.deepseekModel !== undefined) patch.deepseekModel = req.body.deepseekModel;
+    if (req.body.inworldModel !== undefined) patch.inworldModel = req.body.inworldModel;
     if (req.body.accentColor !== undefined) patch.accentColor = req.body.accentColor;
     if (req.body.ttsProvider !== undefined) patch.ttsProvider = req.body.ttsProvider;
     if (req.body.sttProvider !== undefined) patch.sttProvider = req.body.sttProvider;
     if (req.body.fishaudioApiKey !== undefined) patch.fishaudioApiKey = req.body.fishaudioApiKey;
+    if (req.body.pixaiToken !== undefined) patch.pixaiToken = req.body.pixaiToken.trim();
+    if (req.body.pixaiModelId !== undefined) patch.pixaiModelId = req.body.pixaiModelId.trim();
+    if (req.body.pixaiModelTitle !== undefined) patch.pixaiModelTitle = req.body.pixaiModelTitle;
+    if (req.body.pixaiModelBaseType !== undefined) patch.pixaiModelBaseType = req.body.pixaiModelBaseType;
+    if (Array.isArray(req.body.pixaiLoras)) {
+      patch.pixaiLoras = req.body.pixaiLoras
+        .filter((l) => l?.versionId)
+        .slice(0, 5)
+        .map((l) => ({
+          versionId: String(l.versionId),
+          title: String(l.title ?? ''),
+          baseModelType: String(l.baseModelType ?? ''),
+          triggerWords: String(l.triggerWords ?? '').slice(0, 256),
+          thumbnail: String(l.thumbnail ?? ''),
+          weight: Math.min(2, Math.max(-2, Number(l.weight) || 1)),
+        }));
+    }
     if (req.body.googleClientId !== undefined) patch.googleClientId = req.body.googleClientId;
     if (req.body.googleClientSecret !== undefined) patch.googleClientSecret = req.body.googleClientSecret;
     if (req.body.telegramBotToken !== undefined) patch.telegramBotToken = req.body.telegramBotToken;
@@ -75,6 +94,7 @@ export async function updateSettings(req, res) {
     setVoiceSettings(settings);
     setGoogleAuthSettings(settings);
     setTelegramSettings(settings);
+    setPixaiSettings(settings);
     res.json(settings);
   } catch (err) {
     console.error('[updateSettings]', err);

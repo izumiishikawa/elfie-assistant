@@ -5,11 +5,13 @@ import app from './src/app.js';
 import { connectDB } from './src/db.js';
 import initRoutes from './src/routes/index.js';
 import { setWss } from './src/openvt.js';
+import { attachInworldRealtimeWS } from './src/inworldRealtime.js';
 import Settings from './src/models/Settings.js';
 import { setLLMSettings } from './src/llm.js';
 import { setVoiceSettings } from './src/voice.js';
 import { setGoogleAuthSettings } from './src/googleAuth.js';
 import { setTelegramSettings } from './src/telegram.js';
+import { setPixaiSettings } from './src/pixai.js';
 import { runRoutinesCheck } from './src/routines.js';
 import { runScheduledWorkflowsCheck } from './src/workflows.js';
 import { runKnowledgeMaintenanceCheck } from './src/knowledgeMaintenance.js';
@@ -27,6 +29,7 @@ if (initSettings) {
   setVoiceSettings(initSettings);
   setGoogleAuthSettings(initSettings);
   setTelegramSettings(initSettings);
+  setPixaiSettings(initSettings);
 }
 
 app.use((_req, res) => {
@@ -38,9 +41,10 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
+const httpServer = app.listen(PORT, () => {
   console.log(`Elfie API running on http://localhost:${PORT}`);
 });
+attachInworldRealtimeWS(httpServer);
 
 // WebSocket server para o OpenVT conectar como cliente
 const wss = new WebSocketServer({ port: WS_PORT });

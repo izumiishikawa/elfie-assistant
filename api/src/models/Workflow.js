@@ -6,7 +6,7 @@ const nodeSchema = new Schema(
     type: {
       type: String,
       required: true,
-      enum: ['webhook', 'schedule', 'routine', 'prompt', 'condition', 'http_request'],
+      enum: ['webhook', 'schedule', 'routine', 'prompt', 'condition', 'http_request', 'telegram_message'],
     },
     position: {
       x: { type: Number, default: 0 },

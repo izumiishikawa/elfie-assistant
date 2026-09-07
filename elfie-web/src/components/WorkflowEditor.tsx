@@ -10,6 +10,7 @@ import {
   Webhook as WebhookIcon, X,
 } from 'lucide-react';
 import { API_BASE } from '../constants';
+import { TelegramIcon } from './icons/TelegramIcon';
 import { Character } from '../stores/mainStore';
 import { Routine } from '../stores/routinesStore';
 import {
@@ -57,6 +58,7 @@ const NODE_META: Record<WorkflowNodeType, { label: string; icon: React.ReactNode
   prompt: { label: 'Prompt', icon: <MessageSquare size={13} />, color: '#7dd3a8' },
   condition: { label: 'Condition', icon: <GitBranch size={13} />, color: '#f0c674' },
   http_request: { label: 'HTTP', icon: <Globe size={13} />, color: '#e29ce2' },
+  telegram_message: { label: 'Telegram', icon: <TelegramIcon size={13} />, color: '#2AABEE' },
 };
 
 const NODE_DEFAULT_DATA: Record<WorkflowNodeType, Record<string, any>> = {
@@ -66,6 +68,7 @@ const NODE_DEFAULT_DATA: Record<WorkflowNodeType, Record<string, any>> = {
   prompt: { prompt: '', forceTts: false, notify: false },
   condition: { mode: 'field', field: '', operator: 'equals', value: '' },
   http_request: { method: 'GET', urlTemplate: '', headers: [], bodyTemplate: '' },
+  telegram_message: { message: '' },
 };
 
 function nodeSummary(type: WorkflowNodeType, data: Record<string, any>): string {
@@ -84,6 +87,8 @@ function nodeSummary(type: WorkflowNodeType, data: Record<string, any>): string 
         : `${data.field || '?'} ${data.operator || '?'} ${data.value ?? ''}`.trim();
     case 'http_request':
       return `${data.method || 'GET'} ${data.urlTemplate || ''}`.slice(0, 70);
+    case 'telegram_message':
+      return (data.message || 'Empty message').slice(0, 70);
     default:
       return '';
   }
@@ -149,6 +154,7 @@ const NODE_TYPES = {
   prompt: (props: NodeProps) => <GenericNode {...props} kind="prompt" />,
   condition: (props: NodeProps) => <GenericNode {...props} kind="condition" />,
   http_request: (props: NodeProps) => <GenericNode {...props} kind="http_request" />,
+  telegram_message: (props: NodeProps) => <GenericNode {...props} kind="telegram_message" />,
 };
 
 
@@ -419,6 +425,23 @@ function NodeConfigPanel({ node, onPatch, onDelete, webhookUrl, webhookSecret, o
         )}
 
         {type === 'http_request' && <HttpRequestFields data={data} onPatch={onPatch} />}
+
+        {type === 'telegram_message' && (
+          <>
+            <p className={fieldLabel}>MESSAGE</p>
+            <textarea
+              value={data.message ?? ''}
+              onChange={(e) => onPatch({ message: e.target.value })}
+              placeholder="E.g.: New report received: {{trigger.body.title}}"
+              className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
+              style={{ minHeight: 140 }}
+            />
+            <p className="text-gray-300 text-[11px] mt-1.5 m-0">
+              Use {'{{trigger.body.x}}'} for the trigger payload, or {'{{steps.<id>.output}}'} for the output of a previous
+              step. Sent to the Telegram account currently linked in Settings.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

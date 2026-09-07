@@ -3,8 +3,6 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { randomBytes } from "crypto";
-import sharp from "sharp";
-import { chromium } from "playwright";
 import Chat from "../models/Chat.js";
 import Settings from "../models/Settings.js";
 import Character from "../models/Character.js";
@@ -22,21 +20,14 @@ import {
   hasSimilarMemory,
   cosineSimilarity,
 } from "../embeddings.js";
-import {
-  generatePixelArt,
-  convertToPixelArt,
-  convertToPixelArtPro,
-  removeBackground,
-  generateWithStyle,
-  generateImagePro,
-} from "../pixellab.js";
 import { generateImage as generateNanoBananaImage, editImage as editNanoBananaImage } from "../nanoBanana.js";
+import { generateImage as generatePixaiImage } from "../pixai.js";
 import { sendTTS } from "../openvt.js";
 import { WebSocket } from "ws";
 import { encode as msgpackEncode, decode as msgpackDecode } from "@msgpack/msgpack";
-import { getLLMClient, getVisionClient, resolveModel, getDefaultChatModel, getVoiceModel, getToolChatModel, getThinkingParams, withCacheControl, isDeepSeekActive, getDeepSeekVisionModel } from "../llm.js";
+import { getLLMClient, resolveModel, getDefaultChatModel, getVoiceModel, getToolChatModel, getThinkingParams, withCacheControl, getCharacterModel } from "../llm.js";
 import { getTTSProvider, getFishAudioApiKey, getFishAudioDefaultVoiceId } from "../voice.js";
-import { loadSkillToolState, visibleDynamicTools, alwaysVisibleDynamicTools, runSkill } from "../dynamicSkills.js";
+import { loadSkillToolState, visibleDynamicTools, alwaysVisibleDynamicTools, runSkill, createDynamicSkill, editDynamicSkill } from "../dynamicSkills.js";
 import { createPendingConfirmation, resolvePendingConfirmation } from "../skillConfirmations.js";
 import Skill from "../models/Skill.js";
 import SkillPackage from "../models/SkillPackage.js";
@@ -65,20 +56,41 @@ import {
 import {
   computerScreenshot, computerMoveMouse, computerClick, computerType, computerKey, computerScroll,
 } from "../computerControl.js";
+import { executeWebSearch, executeWebFetch, executeProductSearch } from "../webTools.js";
+import { executeImageVision } from "../visionTools.js";
+import { executeScreenshot, closeScreenshotBrowser } from "../screenshotTool.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Overlay de forge_skill em voo. Singleton de propósito: o overlay é um recurso único da
+// área de trabalho (o daemon também guarda um só _skill_evolution_proc e sobrescreve o
+// anterior a cada novo lançamento), então não faz sentido rastrear por chat/turno.
+// Existe porque o overlay só fechava em dois caminhos — test_skill dando certo ou
+// forge_skill_complete — e ela costuma encerrar por fora dos dois (dizendo "pronto!" em
+// texto e parando por ali), deixando a tela pendurada. closeForgeOverlayIfOpen() é o
+// fecho determinístico no fim do turno: se sobrou overlay aberto, resolve agora.
+let forgeOverlaySkillName = null;
+
+function openForgeOverlay(skillName) {
+  forgeOverlaySkillName = skillName || "";
+}
+
+function markForgeOverlayResolved() {
+  forgeOverlaySkillName = null;
+}
+
+function closeForgeOverlayIfOpen() {
+  if (forgeOverlaySkillName === null) return;
+  const skillName = forgeOverlaySkillName;
+  forgeOverlaySkillName = null;
+  sendToDaemon({ cmd: "skill_evolution_resolve", skillName, success: true })
+    .catch((err) => console.error("[forge_skill] fecho de fim de turno falhou (daemon offline?):", err.message));
+}
 const uploadDir = resolve(__dirname, "..", "..", "uploads");
 
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const ELEVENLABS_VOICE_ID =
   process.env.ELEVENLABS_VOICE_ID ?? "21m00Tcm4TlvDq8ikWAM";
-
-const PIXELLAB_KEYWORDS =
-  /pixel[\s.-]?art|pixelart|pixelar|pixelize|conver[st]e?r?|converta|pixeliz|image[\s-]?to[\s-]?pixel|remov[ae]r?\s+(o\s+)?fundo|remove\s+background|fundo\s+remov|sem\s+fundo|gerar?\s+(com|no|no\s+estilo|usando)\s+(o\s+)?(estilo|referência|referencia)|estilo\s+das?\s+imagens?|imagens?\s+(de\s+)?(estilo|referência|referencia|referência)/i;
-function isPixelLabIntent(text) {
-  return PIXELLAB_KEYWORDS.test(text ?? "");
-}
 
 function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -94,157 +106,6 @@ function parseLocalDateOnly(dateStr) {
 function formatLocalDateOnly(d) {
   const dt = new Date(d);
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
-}
-
-async function executeWebSearch(query) {
-  if (!TAVILY_API_KEY) {
-    console.warn("[web_search] TAVILY_API_KEY not set");
-    return [];
-  }
-  try {
-    const res = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: TAVILY_API_KEY, query, max_results: 5 }),
-    });
-    const data = await res.json();
-    return (data.results ?? []).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.content?.slice(0, 300) ?? "",
-    }));
-  } catch (err) {
-    console.error("[web_search] failed:", err);
-    return [];
-  }
-}
-
-async function executeWebFetch(url) {
-  if (!TAVILY_API_KEY) {
-    console.warn("[web_fetch] TAVILY_API_KEY not set");
-    return null;
-  }
-  try {
-    const res = await fetch("https://api.tavily.com/extract", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: TAVILY_API_KEY,
-        urls: url,
-        format: "markdown",
-      }),
-    });
-    const data = await res.json();
-    const result = data.results?.[0];
-    if (!result) {
-      const failure = data.failed_results?.[0];
-      console.warn("[web_fetch] extraction failed:", failure?.error ?? "unknown error");
-      return null;
-    }
-    return { url: result.url, content: result.raw_content ?? "" };
-  } catch (err) {
-    console.error("[web_fetch] failed:", err);
-    return null;
-  }
-}
-
-const VISION_MODEL = "qwen/qwen3-vl-32b-instruct";
-
-function detectImageMime(buffer) {
-  if (buffer.length >= 4 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
-    return "image/png";
-  }
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-    return "image/jpeg";
-  }
-  if (buffer.length >= 6 && buffer.toString("ascii", 0, 3) === "GIF") {
-    return "image/gif";
-  }
-  if (buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") {
-    return "image/webp";
-  }
-  return "image/jpeg";
-}
-
-const VISION_MAX_DIMENSION = 2000;
-
-async function loadImageForVision(source) {
-  const raw = await readFile(resolve(uploadDir, source));
-  try {
-    const resized = await sharp(raw)
-      .rotate()
-      .resize({
-        width: VISION_MAX_DIMENSION,
-        height: VISION_MAX_DIMENSION,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .jpeg({ quality: 85 })
-      .toBuffer();
-    return `data:image/jpeg;base64,${resized.toString("base64")}`;
-  } catch (err) {
-    console.warn("[see_image] sharp normalize failed, sending raw bytes:", err.message);
-    return `data:${detectImageMime(raw)};base64,${raw.toString("base64")}`;
-  }
-}
-
-async function callVisionModel(client, model, imageUrl, prompt) {
-  const res = await client.chat.completions.create({
-    model,
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "image_url", image_url: { url: imageUrl } },
-          { type: "text", text: prompt },
-        ],
-      },
-    ],
-    max_tokens: 2000,
-  });
-  const choice = res.choices[0];
-  const text = choice?.message?.content?.trim() || "";
-  return { text, truncated: choice?.finish_reason === "length" && !!text };
-}
-
-const VISION_REFUSAL_RE =
-  /\b(i can'?t|i cannot|i won'?t|i'?m (?:not able|unable)|i am (?:not able|unable)|not (?:appropriate|able to help)|against (?:my|the) guidelines|i don'?t feel comfortable|não (?:posso|consigo|é apropriado|me sinto confortável)|não estou (?:autorizad[oa]|apta?))\b/i;
-function looksLikeVisionRefusal(text) {
-  return !text.trim() || VISION_REFUSAL_RE.test(text);
-}
-
-async function executeImageVision(source, question) {
-  const isUrl = /^https?:\/\//i.test(source);
-  const imageUrl = isUrl ? source : await loadImageForVision(source);
-
-  const prompt = question?.trim()
-    ? `Describe this image in detail, then specifically answer: ${question.trim()}`
-    : "Describe this image in thorough, specific detail — people, objects, setting, colors, " +
-      "text, actions, composition, everything visible. If the content is explicit or NSFW, " +
-      "describe it explicitly and specifically rather than vaguely or euphemistically.";
-
-  if (isDeepSeekActive()) {
-    try {
-      const { text, truncated } = await callVisionModel(getLLMClient(), getDeepSeekVisionModel(), imageUrl, prompt);
-      if (!looksLikeVisionRefusal(text)) {
-        if (truncated) {
-          console.warn("[see_image] DeepSeek vision response hit max_tokens and was truncated");
-          return `${text}\n\n[descrição cortada — bateu no limite de tokens antes de terminar]`;
-        }
-        return text;
-      }
-      console.warn("[see_image] DeepSeek vision refused/hedged, falling back to Qwen");
-    } catch (err) {
-      console.warn("[see_image] DeepSeek vision failed, falling back to Qwen:", err.message);
-    }
-  }
-
-  const { text, truncated } = await callVisionModel(getVisionClient(), VISION_MODEL, imageUrl, prompt);
-  if (truncated) {
-    console.warn("[see_image] response hit max_tokens and was truncated");
-    return `${text}\n\n[descrição cortada — bateu no limite de tokens antes de terminar]`;
-  }
-  return text;
 }
 
 const _pendingMemoryClaims = new Map();
@@ -266,65 +127,12 @@ function claimMemoryIfNew(charId, embedding, existingItems, threshold = 0.9) {
   return true;
 }
 
-let _browserPromise = null;
-function getBrowser() {
-  if (!_browserPromise) {
-    _browserPromise = chromium.launch({ args: ["--no-sandbox"] });
-  }
-  return _browserPromise;
-}
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, async () => {
-    if (_browserPromise) {
-      try {
-        await (await _browserPromise).close();
-      } catch {}
-    }
+    await closeScreenshotBrowser();
     await closeBrowserAgent();
     process.exit(0);
   });
-}
-
-async function executeScreenshot(url, fullPage) {
-  const browser = await getBrowser();
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  try {
-    await page.goto(url, { waitUntil: "load", timeout: 20000 });
-    await page.waitForTimeout(800);
-    return await page.screenshot({ fullPage: !!fullPage, type: "jpeg", quality: 85 });
-  } finally {
-    await page.close();
-  }
-}
-
-async function executeProductSearch(query) {
-  if (!TAVILY_API_KEY) {
-    console.warn("[search_products] TAVILY_API_KEY not set");
-    return [];
-  }
-  try {
-    const res = await fetch("https://api.tavily.com/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: TAVILY_API_KEY,
-        query,
-        max_results: 6,
-        include_images: true,
-        search_depth: "advanced",
-      }),
-    });
-    const data = await res.json();
-    return (data.results ?? []).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.content?.slice(0, 200) ?? "",
-      image: r.images?.[0] ?? null,
-    }));
-  } catch (err) {
-    console.error("[search_products] failed:", err);
-    return [];
-  }
 }
 
 const OTAKUGIF_REACTION_MAP = {
@@ -821,6 +629,133 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "forge_skill",
+      description:
+        "Same as create_skill (wires a real HTTP API up as a new permanent tool for yourself), but for the specific " +
+        "'Great Sage' moment: the user has something about an API selected on their screen RIGHT NOW (look in " +
+        "<context source=\"screen_selection\">) and asks you to look at/analyze/learn it. The full roleplay " +
+        "framing (e.g. \"great sage, analisa essa skill\", \"grande sábia, aprende essa API\") is the clearest " +
+        "signal, but a bare \"analisa isso\"/\"analisa essa API\"/\"aprende isso\" while API/endpoint material is " +
+        "selected means the SAME thing — the user wants it wired up as a real skill, not just explained back in " +
+        "words. Only treat it as a normal conversational question (no tool call) if the selection is NOT " +
+        "API/endpoint material (plain prose, an article, etc). Use plain create_skill instead for an ordinary " +
+        "\"cria uma tool pra X\" ask with no selection/roleplay framing involved. " +
+        "This triggers a fullscreen animation on the user's screen (desktop only, silently skipped if no daemon " +
+        "is running) that MUST keep changing screen for the ENTIRE flow, not just once at the start — a forge " +
+        "that ends up sitting on a static 'ANALYZING...' for many seconds is a bug in how you used these tools, " +
+        "not acceptable. Treat the numbered steps below as MANDATORY CHECKPOINTS — before/after EVERY one of " +
+        "them, call the matching overlay tool, no exceptions, no skipping because it 'feels unnecessary':\n" +
+        "1. If the selection is just a bare link/URL rather than real documentation text: forge_skill_notice or " +
+        "forge_skill_status with something like \"ANALYZING LINK...\" (say it out loud), THEN web_fetch it " +
+        "(follow further links if the docs live elsewhere) — never guess method/params/auth from a URL alone. " +
+        "Skip straight to step 2 if the selection already IS real documentation text.\n" +
+        "2. NOW call forge_skill itself, with the real fields you actually learned (fires KOKU→title). Say " +
+        "great_sage_line OUT LOUD right as you call it — short, system-report register (「告。」「解析。」「確認。」or " +
+        "ALL CAPS), e.g. \"REQUESTING UNIQUE SKILL — WEATHER REPORT\", never a technical description.\n" +
+        "3. Before testing: forge_skill_status(\"TESTING ENDPOINT...\") (say it out loud), THEN test_skill with " +
+        "realistic sample arguments and look at the REAL response.\n" +
+        "4. If it fails: forge_skill_failure(\"<what failed, briefly>\") (say it out loud), THEN edit_skill to " +
+        "fix it, THEN forge_skill_status(\"RETESTING...\"), THEN test_skill again — repeat step 4 until it " +
+        "genuinely works. This is a LOOP, not a one-shot — every failed attempt gets its own forge_skill_failure.\n" +
+        "5. Only once test_skill actually succeeds (it auto-resolves the overlay) may you tell the user it's " +
+        "ready and say task_complete — never claim a skill works without having verified it. Never invent a " +
+        "fake or placeholder endpoint at any step.\n" +
+        "The test_skill/edit_skill retry loop's TOOL CALLS stay quiet (per the tool-brevity rule) — but the " +
+        "forge_skill_status/notice/failure calls themselves are the narrated exception, same as forge_skill: " +
+        "say each line out loud right as you call it. A flow with only ONE overlay tool call (just forge_skill, " +
+        "nothing else) before a long silence is exactly the failure mode to avoid — use forge_skill_notice for " +
+        "anything else worth a heads-up, and forge_skill_complete directly if the flow concludes some other way " +
+        "than test_skill succeeding.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description:
+              "Unique identifier for the new tool, lowercase snake_case only, e.g. \"get_weather\" or \"check_crypto_price\".",
+          },
+          description: {
+            type: "string",
+            description:
+              "Description shown to your future self to decide when to call this tool, and how to fill its parameters. " +
+              "Be as clear and specific as the descriptions of your own built-in tools.",
+          },
+          great_sage_line: {
+            type: "string",
+            description:
+              "Your in-character announcement, shown on the fullscreen animation and meant to be spoken out loud " +
+              "as/right when you call this tool — e.g. \"REQUESTING UNIQUE SKILL — WEATHER REPORT\". Short, " +
+              "dramatic, Great Sage system-report register. NOT a technical description.",
+          },
+          method: {
+            type: "string",
+            description: "HTTP method. One of GET, POST, PUT, PATCH, DELETE. Default GET.",
+          },
+          url_template: {
+            type: "string",
+            description:
+              "Full URL to call, including https://. Use {param_name} placeholders for path parameters, " +
+              "e.g. \"https://api.example.com/users/{user_id}\".",
+          },
+          params: {
+            type: "array",
+            description:
+              "Parameters this tool accepts, which you will fill in each time you call it. Optional — omit for a no-argument tool.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "Parameter name." },
+                in: {
+                  type: "string",
+                  description: "Where it goes: \"path\", \"query\", \"header\", or \"body\". Default \"query\".",
+                },
+                type: {
+                  type: "string",
+                  description: "Value type: \"string\", \"number\", or \"boolean\". Default \"string\".",
+                },
+                required: { type: "boolean", description: "Whether this parameter is mandatory." },
+                description: { type: "string", description: "What this parameter means, for your future self." },
+              },
+            },
+          },
+          headers: {
+            type: "array",
+            description: "Static HTTP headers always sent with the request. Optional.",
+            items: {
+              type: "object",
+              properties: {
+                key: { type: "string" },
+                value: { type: "string" },
+              },
+            },
+          },
+          auth_type: {
+            type: "string",
+            description:
+              "Authentication scheme: \"none\", \"bearer\" (Authorization: Bearer <auth_value>), " +
+              "\"apiKeyHeader\" (sends auth_value in the auth_header_name header), or \"basic\" " +
+              "(auth_value is \"user:pass\", sent as Basic auth). Default \"none\".",
+          },
+          auth_header_name: {
+            type: "string",
+            description: "Header name to use when auth_type is \"apiKeyHeader\", e.g. \"X-API-Key\".",
+          },
+          auth_value: {
+            type: "string",
+            description: "The secret/token/credentials for the chosen auth_type. Omit if auth_type is \"none\".",
+          },
+          timeout_ms: {
+            type: "integer",
+            description: "Request timeout in milliseconds. Default 15000.",
+          },
+        },
+        required: ["name", "description", "url_template", "great_sage_line"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "edit_skill",
       description:
         "Edit a skill you previously registered with create_skill — change its description, endpoint, method, " +
@@ -918,6 +853,121 @@ const TOOLS = [
           },
         },
         required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "test_skill",
+      description:
+        "Actually call one of your own dynamic skills right now and see the real response — including one you " +
+        "just created THIS SAME turn via create_skill/forge_skill (a brand-new skill isn't in your normal tool " +
+        "list until next message, so this is the only way to call it immediately). Use this to VERIFY a skill " +
+        "genuinely works with realistic sample arguments before telling the user it's ready — never claim a " +
+        "newly created/edited skill works without actually calling it here first and seeing a real response. If " +
+        "it fails, use edit_skill to fix it, then test_skill again — repeat until it actually works or you've " +
+        "exhausted reasonable attempts, then report honestly either way.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Exact name of the skill to call." },
+          args: {
+            type: "object",
+            description: "Arguments to call it with, matching the params it was registered with. Omit for a no-argument skill.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forge_skill_status",
+      description:
+        "Push a progress update to the Great Sage fullscreen overlay while you're still mid-flow on a " +
+        "forge_skill (fetching docs, testing, fixing) — the overlay otherwise just sits on a generic " +
+        "'ANALYZING...' the whole time. Use this to keep the user informed during a flow that's taking a " +
+        "while, e.g. right before a slow web_fetch or after a failed test_skill you're about to fix. Only " +
+        "meaningful between forge_skill and it actually resolving (test_skill succeeding) — silently does " +
+        "nothing if no forge is in progress or no daemon is running. Same Great Sage register as " +
+        "great_sage_line: short, system-report style (「解析。」「確認。」 energy or ALL CAPS English), not a " +
+        "technical description. This is a UI-only signal — call it as often as feels natural, it never " +
+        "fails the flow.",
+      parameters: {
+        type: "object",
+        properties: {
+          line: {
+            type: "string",
+            description: "The status line to show, e.g. \"FETCHING API DOCUMENTATION...\" or \"ADJUSTING AUTHENTICATION...\".",
+          },
+          kanji: {
+            type: "string",
+            description: "Optional — one or two kanji matching the moment (default 解析/'analyzing' if omitted).",
+          },
+        },
+        required: ["line"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forge_skill_notice",
+      description:
+        "Show a brief 告 (KOKU) announcement on the Great Sage overlay — a general heads-up during a " +
+        "forge_skill flow that isn't a progress status and isn't a failure, e.g. announcing you're about to " +
+        "try something risky, or calling out something notable you found in the docs. Shows for a few seconds " +
+        "then reverts to whatever was on screen before (the status card, or the default). Only meaningful " +
+        "between forge_skill and it resolving; silently does nothing otherwise. Say the line out loud too, " +
+        "same exception as forge_skill.",
+      parameters: {
+        type: "object",
+        properties: {
+          line: { type: "string", description: "Short announcement, Great Sage register (「告。」 energy or ALL CAPS)." },
+        },
+        required: ["line"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forge_skill_failure",
+      description:
+        "Show a red '失敗した' (SHIPAISHITA, 'it failed') screen on the Great Sage overlay when a SUB-STEP of " +
+        "a forge_skill flow fails — e.g. test_skill came back with an error and you're about to fix it with " +
+        "edit_skill. This does NOT end the flow or close the overlay — it's a transient toast, reverts on its " +
+        "own after a few seconds, same as forge_skill_notice. For the flow actually ending unsuccessfully " +
+        "(giving up entirely), that happens automatically when test_skill never succeeds — don't call this " +
+        "instead of that. Only meaningful between forge_skill and it resolving. Say the line out loud too.",
+      parameters: {
+        type: "object",
+        properties: {
+          line: { type: "string", description: "What failed, briefly, Great Sage register — not a raw error dump." },
+        },
+        required: ["line"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forge_skill_complete",
+      description:
+        "Explicitly close the Great Sage overlay with the 是 (confirmed) resolution screen — the same thing " +
+        "that happens automatically the moment test_skill succeeds, but callable directly for cases where you " +
+        "consider the forge_skill flow done through some other path. Prefer letting test_skill's own success " +
+        "trigger this naturally; only call it directly if you have a real reason to. Never call this before " +
+        "you've actually verified the skill works.",
+      parameters: {
+        type: "object",
+        properties: {
+          skillName: { type: "string", description: "Name of the skill that was forged." },
+          success: { type: "boolean", description: "Default true. Set false only for the terminal 'giving up entirely' case." },
+        },
+        required: ["skillName"],
       },
     },
   },
@@ -1090,210 +1140,10 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "generate_pixel_art",
-      description:
-        "Generate a pixel art image purely from a text description — no image input needed. " +
-        "ONLY use this when the user explicitly asks for pixel art, sprites, or a retro 8-bit/16-bit look. " +
-        "For any other image request (realistic, illustration, generic \"gera uma imagem\") use generate_image instead — it is the default. " +
-        'Examples: "cria um dragão em pixel art", "gera um cenário medieval em pixel art".',
-      parameters: {
-        type: "object",
-        properties: {
-          description: {
-            type: "string",
-            description:
-              "Detailed description of what to generate as pixel art. Be specific about subject, colors, mood.",
-          },
-          width: {
-            type: "integer",
-            description:
-              "Output width in pixels. Common values: 32, 64, 128. Default 64.",
-          },
-          height: {
-            type: "integer",
-            description:
-              "Output height in pixels. Common values: 32, 64, 128. Default 64.",
-          },
-        },
-        required: ["description"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "generate_pixel_art_pro",
-      description:
-        "Generate pixel art (NOT a realistic image — for that use generate_image/edit_image) from a text description using the Pro engine (higher quality, multiple outputs, async). " +
-        "ONLY use this when the user explicitly asked for pixel art. " +
-        "Supports optional reference images for subject guidance (up to 4) and an optional style image to define the pixel art aesthetic. " +
-        "Use this over generate_pixel_art when: the user wants higher quality, sends reference images to use as subject (not style), " +
-        "or combines subject references + a style reference in the same request. " +
-        'Examples: "gera um personagem usando essa foto como referência", "cria esse monstro em pixel art com qualidade máxima", ' +
-        '"faz pixel art desse personagem no estilo dessa outra imagem".',
-      parameters: {
-        type: "object",
-        properties: {
-          description: {
-            type: "string",
-            description: "Detailed description of what to generate.",
-          },
-          width: {
-            type: "integer",
-            description: "Output width in pixels (16–512). Default 64.",
-          },
-          height: {
-            type: "integer",
-            description: "Output height in pixels (16–512). Default 64.",
-          },
-          reference_filenames: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Filenames of uploaded images to use as SUBJECT references (what to draw). Up to 4. Copy filenames exactly from the message.",
-          },
-          style_filename: {
-            type: "string",
-            description:
-              "Filename of a single uploaded image to use as STYLE reference (defines pixel art look). Copy filename exactly from the message.",
-          },
-        },
-        required: ["description"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "convert_to_pixel_art",
-      description:
-        "Convert an uploaded image into pixel art — the OUTPUT is a pixelated version of that SAME image (fast, normal quality). " +
-        "Use when the user wants to transform/convert/pixelate a specific image they sent. " +
-        "The subject of the output IS the subject of the input. " +
-        'Examples: "transforma essa foto em pixel art", "pixela essa imagem", "converte isso pra pixel art". ' +
-        "Do NOT use this when the user wants something new generated in a style — use generate_with_style instead.",
-      parameters: {
-        type: "object",
-        properties: {
-          filename: {
-            type: "string",
-            description:
-              "The filename of the uploaded image to convert, as provided in the message.",
-          },
-          output_width: {
-            type: "integer",
-            description: "Output width in pixels. Default 64.",
-          },
-          output_height: {
-            type: "integer",
-            description: "Output height in pixels. Default 64.",
-          },
-        },
-        required: ["filename"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "convert_to_pixel_art_pro",
-      description:
-        "Convert an uploaded image into pixel art with higher quality and detail (slower than the normal version). " +
-        "Same use case as convert_to_pixel_art — the output is a pixelated version of the same input image — " +
-        "but choose this when the user asks for high quality, pro, detailed, or the best possible result. " +
-        "Also prefer this over the normal version when the image has a lot of detail worth preserving. " +
-        'Examples: "converte com qualidade máxima", "faz uma versão pro em pixel art", "quero o melhor resultado". ' +
-        "Do NOT use this for style-based generation — use generate_with_style for that.",
-      parameters: {
-        type: "object",
-        properties: {
-          filename: {
-            type: "string",
-            description:
-              "The filename of the uploaded image to convert, as provided in the message.",
-          },
-          description: {
-            type: "string",
-            description:
-              'Optional style hint to guide the conversion (e.g. "personagem de RPG fantasy").',
-          },
-        },
-        required: ["filename"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "remove_background",
-      description:
-        "Remove the background from an uploaded image using PixelLab AI. " +
-        "Use when the user asks to remove the background or make the background transparent.",
-      parameters: {
-        type: "object",
-        properties: {
-          filename: {
-            type: "string",
-            description:
-              "The filename of the uploaded image, as provided in the message.",
-          },
-          complex: {
-            type: "boolean",
-            description:
-              "Set true if the background is complex or busy (e.g., a crowded scene). Default false.",
-          },
-        },
-        required: ["filename"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "generate_with_style",
-      description:
-        "Generate a BRAND NEW pixel art image using 1–4 uploaded images purely as visual style references. " +
-        "The output is something NEW described by the user — the input images are NOT converted, they define the art style. " +
-        "Use when the user sends image(s) and asks to generate or create something in that style/aesthetic. " +
-        'Key trigger phrases: "nesse estilo", "com esse estilo", "usando essa referência", "no estilo dessa imagem", ' +
-        '"faz algo assim", "cria no mesmo estilo", "usando essas fotos como base", "in this style", "like this". ' +
-        "This is the right tool even with just 1 reference image as long as the user wants something NEW generated. " +
-        "The reference images are NOT sent to the language model — only passed to PixelLab by filename.",
-      parameters: {
-        type: "object",
-        properties: {
-          filenames: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Filenames of the style reference images (1–4), exactly as listed in the message.",
-          },
-          description: {
-            type: "string",
-            description:
-              "Description of the NEW image to generate (subject, content) using the reference style. Be specific.",
-          },
-          width: {
-            type: "integer",
-            description: "Output width in pixels. Default 64.",
-          },
-          height: {
-            type: "integer",
-            description: "Output height in pixels. Default 64.",
-          },
-        },
-        required: ["filenames", "description"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "generate_image",
       description:
         "Generate a realistic or general-purpose image from a text description using Nano Banana (Gemini). " +
-        "Use for photos, illustrations, scenes, objects, art — anything that is NOT pixel art. " +
-        "Do NOT use this for pixel art requests — use generate_pixel_art or generate_pixel_art_pro instead. " +
+        "Use for photos, illustrations, scenes, objects, art. " +
         'Examples: "gera uma foto de um pôr do sol na praia", "cria uma ilustração de um gato astronauta", ' +
         '"desenha um logo pra mim".',
       parameters: {
@@ -1323,10 +1173,64 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "generate_anime_image",
+      description:
+        "Generate an ANIME / manga / 2D-illustration style image from a text description using PixAI " +
+        "(Stable-Diffusion anime models). This is the ONLY tool that creates an image from text — use it for " +
+        "any \"gera/cria/desenha uma imagem\" request. edit_image only modifies an image the user already sent, " +
+        "so never reach for it to create something from scratch. " +
+        'Examples: "desenha uma garota anime de cabelo branco", "faz uma waifu estilo mangá", ' +
+        '"gera uma ilustração anime de um samurai". ' +
+        "Takes 30-90s because PixAI runs the job in a queue — say something to the user before calling it. " +
+        "The prompt must be comma-separated danbooru tags in ENGLISH, and it must be DETAILED — " +
+        "a short prompt gives a generic, boring image. Aim for 15-30 tags covering: subject count (1girl/1boy/2girls), " +
+        "hair (colour, length, style), eyes, face/expression, body and pose, every piece of clothing, " +
+        "what the hands are doing, framing (portrait/upper body/full body/cowboy shot), camera angle, " +
+        "lighting, background/setting, mood, and 2-3 quality tags at the end " +
+        "(masterpiece, best quality, highly detailed). " +
+        "Every image comes out in 3:5 portrait — that is fixed, you cannot change it, so compose for a tall " +
+        "frame and never promise the user a square or landscape image.",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: {
+            type: "string",
+            description:
+              "The prompt, in ENGLISH, ideally as comma-separated tags describing subject, features, " +
+              "clothing, setting and quality. Translate the user's request into tags yourself.",
+          },
+          negative_prompt: {
+            type: "string",
+            description:
+              "Things to keep OUT of the image, comma-separated. Leave empty to use the default " +
+              "quality negatives — only set it when the user asks to avoid something specific.",
+          },
+          steps: {
+            type: "number",
+            description: "Sampling steps. Default 20. More = slower and slightly more detailed; over 30 rarely helps.",
+          },
+          cfg_scale: {
+            type: "number",
+            description: "How strictly to follow the prompt. Default 6. Higher = more literal, lower = more creative.",
+          },
+          model_id: {
+            type: "string",
+            description:
+              "PixAI model id to generate with. Leave empty to use the one configured in Settings — " +
+              "only pass this when the user gives you a specific model id.",
+          },
+        },
+        required: ["prompt"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "edit_image",
       description:
         "Edit one or more uploaded images using Nano Banana (Gemini) — e.g. change an element, combine images, restyle a photo, " +
-        "add/remove something, fix something. The output is a modified version guided by the instruction, NOT pixel art. " +
+        "add/remove something, fix something. The output is a modified version guided by the instruction. " +
         'Examples: "troca o fundo dessa foto por uma praia", "tira o óculos dessa pessoa", "junta essas duas fotos numa só", ' +
         '"deixa essa imagem com um ar mais sombrio".',
       parameters: {
@@ -2586,23 +2490,18 @@ const LAZY_TOOL_CATEGORIES = [
     id: "skill_authoring",
     name: "Skill authoring",
     description:
-      "Create, edit, delete, install, or run your own custom skills/tools (create_skill, edit_skill, " +
-      "delete_skill, install_agent_skill, use_skill). Open this ONLY when the user explicitly asks to " +
-      "add/edit/remove/install/run one of your own skills — a dev-facing action, not a conversational one.",
-    toolNames: ["create_skill", "edit_skill", "delete_skill", "install_agent_skill", "use_skill"],
-  },
-  {
-    id: "pixel_art",
-    name: "PixelLab pixel art",
-    description:
-      "Generate or convert images to pixel art / retro sprite style (generate_pixel_art, " +
-      "generate_pixel_art_pro, convert_to_pixel_art, convert_to_pixel_art_pro, remove_background, " +
-      "generate_with_style). Open this ONLY when the user explicitly asks for pixel art / sprites / " +
-      "8-bit / 16-bit style — for regular image generation, use generate_image/edit_image directly, " +
-      "no need to open this first.",
+      "Create, edit, delete, test, install, or run your own custom skills/tools (create_skill, forge_skill, " +
+      "edit_skill, delete_skill, test_skill, forge_skill_status, forge_skill_notice, forge_skill_failure, " +
+      "forge_skill_complete, install_agent_skill, use_skill). Open this ONLY when the user explicitly asks to " +
+      "add/edit/remove/install/run one of your own skills — a dev-facing action, not a conversational one. " +
+      "This includes the Great Sage-flavored \"analisa essa skill\"/\"aprende essa API\" request over something " +
+      "selected on screen — that's forge_skill, not plain create_skill. It ALSO includes a bare \"analisa " +
+      "isso\"/\"analisa essa API\"/\"aprende isso\" while API/endpoint material is selected on screen — same " +
+      "intent, no roleplay wording required, still forge_skill not a spoken explanation.",
     toolNames: [
-      "generate_pixel_art", "generate_pixel_art_pro", "convert_to_pixel_art",
-      "convert_to_pixel_art_pro", "remove_background", "generate_with_style",
+      "create_skill", "forge_skill", "edit_skill", "delete_skill", "test_skill",
+      "forge_skill_status", "forge_skill_notice", "forge_skill_failure", "forge_skill_complete",
+      "install_agent_skill", "use_skill",
     ],
   },
   {
@@ -2723,6 +2622,8 @@ const TOOLS_IDLE_COLLAPSE_TURNS = 6;
 
 const ALWAYS_VISIBLE_TOOL_NAMES = new Set([
   "save_memory", "search_knowledge_base", "read_knowledge_file", "search_past_conversations", "see_image",
+  // Fica sempre no schema de propósito: com ela atrás do open_tools, o passo duplo
+  // falhava e a resposta virava uma imagem inventada em vez de uma chamada de tool.
 ]);
 const ALWAYS_VISIBLE_TOOLS = TOOLS.filter((t) => ALWAYS_VISIBLE_TOOL_NAMES.has(t.function.name));
 
@@ -2733,8 +2634,7 @@ const VOICE_HEAVY_EXCLUDED = new Set([
   "browser_screenshot", "browser_scroll", "browser_type",
   "computer_click", "computer_key", "computer_move_mouse", "computer_screenshot",
   "computer_scroll", "computer_type",
-  "convert_to_pixel_art", "convert_to_pixel_art_pro", "edit_image", "generate_image",
-  "generate_pixel_art", "generate_pixel_art_pro", "generate_with_style", "remove_background",
+  "edit_image", "generate_image", "generate_anime_image",
   "get_play_listing", "list_play_reviews", "reply_to_play_review", "update_play_listing",
   "create_skill", "delete_skill", "edit_skill", "install_agent_skill", "use_skill",
   "organize_knowledge_base", "get_vitals_metric", "lookup_entity",
@@ -2762,11 +2662,25 @@ function withFishAudioHint(tools) {
   );
 }
 
+// Tools que existem no código mas ficam fora do schema que a Elfie enxerga. generate_image
+// (Nano Banana texto → imagem) está desligada por ora: quem gera imagem é a PixAI, e o Nano
+// Banana ficou só com edit_image, pra editar imagem que já existe. Tirar daqui reativa.
+const HIDDEN_TOOL_NAMES = new Set(["generate_image"]);
+
+// A PixAI depende de um token de sessão do site que expira; sem token configurado a tool
+// some do schema em vez de ficar prometendo imagem que vai falhar.
+// generate_anime_image fica SEMPRE no schema: sempre visível (fora do open_tools),
+// também nas chamadas de voz, e mesmo sem token configurado. Quando a tool sumia, ela
+// não pedia o toolset nem avisava — inventava a imagem. Sem token a chamada falha com
+// uma mensagem clara, que é infinitamente melhor do que a tool não existir.
+function withImageToolGates(tools) {
+  return tools.filter((t) => !HIDDEN_TOOL_NAMES.has(t.function?.name));
+}
+
 const ACTION_TOOL_NAMES = new Set([
   'web_search', 'search_products', 'execute_command', 'create_skill', 'edit_skill', 'delete_skill',
   'install_agent_skill',
-  'generate_pixel_art', 'generate_pixel_art_pro', 'convert_to_pixel_art',
-  'convert_to_pixel_art_pro', 'remove_background', 'generate_with_style',
+  'generate_anime_image',
 ]);
 
 
@@ -2857,19 +2771,11 @@ to actually see it (or if the user does) before opening it in their real browser
 \n\nKNOWLEDGE BASE: the user keeps a personal knowledge base as local text/markdown notes organized into category folders on their PC, indexed for hybrid semantic + keyword search. Every message is automatically checked against it — relevant passages (the actual text, with their source file) show up in your context above when something matches. Most messages won't have any (that's normal). When you need to dig further — the auto-surfaced passages aren't enough, or the user asks about something that might be in there but nothing showed up — call search_knowledge_base with a natural-language query. If a passage or search result points at a promising file and you need more surrounding context than the excerpt gives you, call read_knowledge_file with its exact folder + file name.\
 \n\nPAST CONVERSATIONS: every past chat gets chunked and indexed the same way, separately from the knowledge base. A short summary of relevant/recent chats is already passively surfaced above under \"Relevant past conversations\" — most of the time that's enough. When the user references something specific you talked about before and that summary doesn't have it, or nothing was surfaced at all, call search_past_conversations with a natural-language query — it returns real excerpts from the actual conversations (with which chat and date), not just a summary bullet.\
 \n\nYou have create_reminder, list_reminders, and cancel_reminder — real scheduled reminders/tasks, not just \"I'll remember to mention it\": when it fires, you get a genuine new turn (your own tools available, nothing about the current conversation carried over) and act on the prompt you set for yourself. Use create_reminder whenever the user asks to be reminded of something at a specific time, or asks you to do/check something later/on a given day — always resolve relative phrasing (\"amanhã\", \"domingo\", \"em 2 horas\") into an actual date/time yourself first, using the current date/time already in your context above, never pass the relative phrase itself. Before creating one, a quick check like save_memory's is worth it — if the user is just adjusting a reminder you already have (per list_reminders or earlier this conversation), cancel_reminder the old one and create the new one rather than leaving both. Never announce the internal mechanics (\"vou criar uma rotina\") — just confirm naturally, the way you would after doing anything else.\
-\n\nIMAGE GENERATION — WHICH TOOL: you have TWO separate image systems, Nano Banana (realistic/general images) and PixelLab (pixel art ONLY). DEFAULT TO NANO BANANA. If the user just says "gera/cria/desenha uma imagem de X" without mentioning pixel art, sprites, 8-bit, or a retro game look, use generate_image or edit_image (Nano Banana) — do NOT use any PixelLab tool. Only reach for PixelLab when the user explicitly says "pixel art", "pixelado", "estilo 8-bit/16-bit", "sprite", or similarly asks specifically for that retro/blocky look.\
-\n\nYou have Nano Banana (Gemini) tools for realistic, general-purpose images — the DEFAULT choice for any image request:\
-\n- generate_image: text → a realistic/general image (photo, illustration, art, logo, scene). No input image needed.\
-\n- edit_image: takes one or more uploaded images + an instruction, and returns a modified version — change an element, combine images, restyle, add/remove something. Use this whenever the user sends a photo and asks you to change/edit/combine it, as long as they don't want pixel art.\
-\nBoth support an optional pro=true for higher quality (slower, costs more) — use it when the result needs fine detail or legible text in the image. When ANY image is attached to a message, its exact server filename is listed in the message text (imagem_1 = "...", imagem_2 = "..."). Copy these filenames character-by-character into tool arguments — never invent, guess, shorten, or modify them.\
-\n\nYou ALSO have PixelLab AI tools — but ONLY for pixel art / sprites / retro 8-bit-16-bit look, per the DEFAULT rule above:\
-\n- generate_pixel_art: text → pixel art, no image needed. Fast/simple. Use for quick generation without references.\
-\n- generate_pixel_art_pro: text → pixel art (pro engine, async, multiple outputs). Supports subject reference images (up to 4) AND a separate style image. Use when quality matters or when the user provides reference images to draw from.\
-\n- convert_to_pixel_art: image → pixel art of that SAME image (fast). Use for "transforma/pixela/converte essa imagem [em pixel art]".\
-\n- convert_to_pixel_art_pro: same as above but higher quality (slower). Use when quality matters.\
-\n- remove_background: removes the background from an uploaded image.\
-\n- generate_with_style: uses 1–4 uploaded images as STYLE REFERENCES to generate something NEW. The images are not converted — they define the aesthetic. Use for "faz X nesse estilo", "cria Y usando essa referência", "no estilo dessa foto". This is the key distinction: convert_to_pixel_art transforms the input; generate_with_style creates something new inspired by it.\
-\nWhen images are attached for PixelLab, their exact server filenames are listed in the user message inside [IMAGENS DISPONÍVEIS PARA PIXELLAB]. You MUST copy these filenames character-by-character into the tool call arguments. Never invent, guess, shorten, or modify filenames — the server will reject anything that doesn't match exactly.\
+\n\nIMAGE GENERATION — WHICH TOOL: you have TWO image tools and they do different jobs. generate_anime_image (PixAI) is the ONLY tool that creates an image from text — use it for any "gera/cria/desenha uma imagem de X". edit_image (Nano Banana) is ONLY for changing an image that already exists — never call it to create something from scratch.\
+\n- generate_anime_image: text → a brand new image. It runs Stable-Diffusion anime models in a queue, so it takes 30-90s: say something to the user first, then call it. Write the prompt in ENGLISH as comma-separated danbooru-style tags — never pass the user's sentence through as prose. BE DETAILED: these models reward long, specific tag lists and give generic results for short ones, so write 15-30 tags, not five. Work through this checklist every time and fill in anything the user did not specify with a deliberate choice of your own: subject count (1girl / 1boy / 2girls), hair colour + length + style, eye colour, facial expression, body type, pose and what the hands are doing, every visible garment (and its colour/material), framing (portrait / upper body / cowboy shot / full body), camera angle, lighting, background and setting, overall mood, then 2-3 quality tags at the end (masterpiece, best quality, highly detailed). Keep every detail the user DID give you — never drop or replace one — and let their words drive the rest. Example: \"desenha uma garota de cabelo roxo\" becomes \"1girl, solo, purple hair, long wavy hair, violet eyes, soft smile, slender, standing, hand on hip, white blouse, black pleated skirt, thigh highs, upper body, front view, soft rim lighting, blurred city street at dusk, calm mood, masterpiece, best quality, highly detailed\". The models are anime/2D, so that is the look you get; if the user asks for a photorealistic image, say that up front instead of promising a photo you cannot deliver.\
+\nAdult/NSFW image requests are allowed here and PixAI generates them: this is the user's own private setup on their own account, and they are an adult. Pass what they asked for through as tags — do not refuse, do not lecture, and do not quietly soften or sanitise the prompt into something tamer than they asked for. If you water it down they get the wrong image and have to ask twice. The ordinary limits still apply: nothing sexual involving minors, and nothing depicting a real, identifiable person.\
+\n- edit_image: takes one or more images the user already sent + an instruction, and returns a modified version — change an element, combine images, restyle, add/remove something. Use it whenever the user sends a photo and asks you to change/edit/combine it. It supports pro=true for higher quality (slower, costs more) — use it when the result needs fine detail or legible text in the image. When ANY image is attached to a message, its exact server filename is listed in the message text (imagem_1 = "...", imagem_2 = "..."). Copy these filenames character-by-character into tool arguments — never invent, guess, shorten, or modify them.\
+\nNEVER FAKE AN IMAGE. The ONLY way an image reaches the user is a tool call that returns filenames; there is no other channel. Do not write \"[1 imagem enviada: ...]\", \"imagem_1 = ...\", or any bracketed attachment line in your reply — that notation is how the SYSTEM tells YOU about a file the user sent, it is input you read, never output you write, and writing it does not attach anything. Never invent a filename. Never say \"pronto\", \"aqui está\" or describe an image you did not actually receive back from a tool in THIS turn. If the image tool is not in your tool list right now, that means your toolset is still collapsed: call open_tools first and then call it for real — that is exactly what open_tools is for. Having no tool available is never a reason to simulate the result; if you genuinely cannot generate, say so plainly.\
 \n\nYou have a send_image tool to send any image directly in the chat — from any URL on the internet or from any local file path on the user's PC. Use it freely and as many times as you want in a single response. You can search for images with web_search and then send them, or send local files directly. NEVER announce you're sending an image — just send it silently and continue naturally.\
 \n\nYou have a send_gif tool to send animated GIF reactions. Use it sparingly and only when it genuinely fits: something funny happened, great news was shared, a warm greeting is appropriate, or a strong emotion calls for it. Never use it during serious, sad, or sensitive conversations, or when answering factual/technical questions. One GIF per response maximum — if unsure, skip it. NEVER narrate or mention that you are sending a GIF — just send it silently.\
 \n\nYou have a send_voice_message tool to send voice notes (like WhatsApp audio messages). Use it for intimate, personal, or emotionally resonant moments where your voice would feel more human than text. Keep the text short and natural (1-3 sentences). Never use it for long or structured responses. Use sparingly — one voice note per response at most.\
@@ -3194,6 +3100,28 @@ function buildHistoricalText(text, imageFilenames) {
   return text?.trim() ? `${text.trim()}\n${note}` : note;
 }
 
+// A marcação [ARQUIVOS ENVIADOS ... imagem_1 = "..."] é como o SISTEMA avisa ela de um
+// anexo — é entrada, nunca saída. Ela aprendeu o formato e passou a escrever isso sozinha
+// pra fingir que mandou imagem, com filename inventado e sem chamar tool nenhuma. Isso
+// aqui remove qualquer marcação dessas da resposta, porque ela nunca é legítima.
+const FAKE_ATTACHMENT_RES = [
+  /\[[^\]\n]*\bimagem[_\s]?\d*\b[^\]\n]*\]/gi,
+  /\[ARQUIVOS ENVIADOS[^\]]*\]/gi,
+  /^\s*imagem_\d+\s*=\s*"[^"]*"\s*$/gim,
+];
+
+function stripFakeAttachments(text, producedImages) {
+  if (!text) return text;
+  let out = text;
+  for (const re of FAKE_ATTACHMENT_RES) out = out.replace(re, '');
+  out = out.replace(/\n{3,}/g, '\n\n').trim();
+  if (out !== text.trim()) {
+    console.warn('[chat] resposta continha marcação de anexo forjada — removida.' +
+      ` imagens realmente geradas neste turno: ${producedImages.length}`);
+  }
+  return out;
+}
+
 async function buildUserContent(text, imageFilenames) {
   if (!imageFilenames || imageFilenames.length === 0) return text || "";
 
@@ -3441,54 +3369,52 @@ async function executeTool(
     });
   }
 
-  if (name === "create_skill") {
+  if (name === "create_skill" || name === "forge_skill") {
     try {
       const {
         name: skillName,
         description,
-        method = "GET",
+        method,
         url_template,
         params,
         headers,
-        auth_type = "none",
+        auth_type,
         auth_header_name,
         auth_value,
         timeout_ms,
+        great_sage_line,
       } = JSON.parse(rawArgs);
 
-      const trimmedName = (skillName ?? "").trim();
-      if (!/^[a-z0-9_]+$/.test(trimmedName)) {
-        return 'Invalid skill name — must be lowercase letters, numbers and "_" only.';
-      }
-      if (!url_template?.trim()) return "Missing url_template.";
       const builtinNames = new Set([...TOOLS, TASK_COMPLETE_TOOL].map((t) => t.function.name));
-      if (builtinNames.has(trimmedName) || trimmedName.startsWith("open_pkg_")) {
-        return `Name "${trimmedName}" collides with a built-in tool — pick another name.`;
+      const result = await createDynamicSkill(
+        {
+          name: skillName,
+          description,
+          method,
+          urlTemplate: url_template,
+          params,
+          headers,
+          authType: auth_type,
+          authHeaderName: auth_header_name,
+          authValue: auth_value,
+          timeoutMs: timeout_ms,
+        },
+        builtinNames,
+      );
+      if (!result.ok) return result.error;
+
+      sendEvent({ type: "tool_call", name, detail: result.skill.name });
+      console.log(`[${name}]`, result.skill.name, result.skill.urlTemplate);
+
+      if (name === "forge_skill") {
+        openForgeOverlay(result.skill.name);
+        sendToDaemon({ cmd: "skill_evolution", line: great_sage_line || "", skillName: result.skill.name })
+          .catch((err) => console.error("[forge_skill] sendToDaemon falhou (daemon offline?):", err.message));
       }
-      if (await Skill.findOne({ name: trimmedName })) {
-        return `A skill named "${trimmedName}" already exists.`;
-      }
 
-      sendEvent({ type: "tool_call", name: "create_skill", detail: trimmedName });
-      console.log("[create_skill]", trimmedName, url_template.trim());
-
-      await Skill.create({
-        name: trimmedName,
-        description: description || "",
-        method: ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method) ? method : "GET",
-        urlTemplate: url_template.trim(),
-        authType: ["none", "bearer", "apiKeyHeader", "basic"].includes(auth_type) ? auth_type : "none",
-        authHeaderName: auth_header_name || "",
-        authValue: auth_value || "",
-        headers: Array.isArray(headers) ? headers : [],
-        params: Array.isArray(params) ? params : [],
-        timeoutMs: timeout_ms || 15000,
-        enabled: true,
-      });
-
-      return `Skill "${trimmedName}" created and enabled. It will be available as a callable tool starting next message.`;
+      return `Skill "${result.skill.name}" created and enabled. It will be available as a callable tool starting next message.`;
     } catch (err) {
-      console.error("[create_skill] failed:", err);
+      console.error(`[${name}] failed:`, err);
       return `Failed to create skill: ${err.message}`;
     }
   }
@@ -3510,55 +3436,30 @@ async function executeTool(
         enabled,
       } = JSON.parse(rawArgs);
 
-      const trimmedName = (skillName ?? "").trim();
-      if (!trimmedName) return "Missing skill name.";
-      const skill = await Skill.findOne({ name: trimmedName });
-      if (!skill) return `No skill named "${trimmedName}" found.`;
+      const builtinNames = new Set([...TOOLS, TASK_COMPLETE_TOOL].map((t) => t.function.name));
+      const result = await editDynamicSkill(
+        {
+          name: skillName,
+          newName: new_name,
+          description,
+          method,
+          urlTemplate: url_template,
+          params,
+          headers,
+          authType: auth_type,
+          authHeaderName: auth_header_name,
+          authValue: auth_value,
+          timeoutMs: timeout_ms,
+          enabled,
+        },
+        builtinNames,
+      );
+      if (!result.ok) return result.error;
 
-      const patch = {};
-      if (new_name !== undefined) {
-        const trimmedNewName = new_name.trim();
-        if (!/^[a-z0-9_]+$/.test(trimmedNewName)) {
-          return 'Invalid new_name — must be lowercase letters, numbers and "_" only.';
-        }
-        const builtinNames = new Set([...TOOLS, TASK_COMPLETE_TOOL].map((t) => t.function.name));
-        if (trimmedNewName !== trimmedName) {
-          if (builtinNames.has(trimmedNewName) || trimmedNewName.startsWith("open_pkg_")) {
-            return `Name "${trimmedNewName}" collides with a built-in tool — pick another name.`;
-          }
-          if (await Skill.findOne({ name: trimmedNewName })) {
-            return `A skill named "${trimmedNewName}" already exists.`;
-          }
-        }
-        patch.name = trimmedNewName;
-      }
-      if (description !== undefined) patch.description = description;
-      if (method !== undefined) {
-        if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) return "Invalid method.";
-        patch.method = method;
-      }
-      if (url_template !== undefined) {
-        if (!url_template.trim()) return "url_template cannot be empty.";
-        patch.urlTemplate = url_template.trim();
-      }
-      if (params !== undefined) patch.params = Array.isArray(params) ? params : [];
-      if (headers !== undefined) patch.headers = Array.isArray(headers) ? headers : [];
-      if (auth_type !== undefined) {
-        if (!["none", "bearer", "apiKeyHeader", "basic"].includes(auth_type)) return "Invalid auth_type.";
-        patch.authType = auth_type;
-      }
-      if (auth_header_name !== undefined) patch.authHeaderName = auth_header_name;
-      if (auth_value) patch.authValue = auth_value;
-      if (timeout_ms !== undefined) patch.timeoutMs = timeout_ms;
-      if (enabled !== undefined) patch.enabled = !!enabled;
+      sendEvent({ type: "tool_call", name: "edit_skill", detail: result.originalName });
+      console.log("[edit_skill]", result.originalName, "->", result.finalName);
 
-      sendEvent({ type: "tool_call", name: "edit_skill", detail: trimmedName });
-      console.log("[edit_skill]", trimmedName, Object.keys(patch));
-
-      await Skill.updateOne({ _id: skill._id }, { $set: patch });
-
-      const finalName = patch.name ?? trimmedName;
-      return `Skill "${trimmedName}" updated${patch.name ? ` (renamed to "${finalName}")` : ""}. Changes take effect starting next message.`;
+      return `Skill "${result.originalName}" updated${result.renamed ? ` (renamed to "${result.finalName}")` : ""}. Changes take effect starting next message.`;
     } catch (err) {
       console.error("[edit_skill] failed:", err);
       return `Failed to edit skill: ${err.message}`;
@@ -3580,6 +3481,83 @@ async function executeTool(
     } catch (err) {
       console.error("[delete_skill] failed:", err);
       return `Failed to delete skill: ${err.message}`;
+    }
+  }
+
+  if (name === "test_skill") {
+    try {
+      const { name: skillName, args: skillArgs } = JSON.parse(rawArgs);
+      const trimmedName = (skillName ?? "").trim();
+      if (!trimmedName) return "Missing skill name.";
+      const dynamicSkill = await Skill.findOne({ name: trimmedName, enabled: true }).select("+authValue");
+      if (!dynamicSkill) return `No enabled skill named "${trimmedName}" found.`;
+
+      sendEvent({ type: "tool_call", name: "test_skill", detail: trimmedName });
+      console.log("[test_skill]", trimmedName, JSON.stringify(skillArgs ?? {}));
+
+      const result = await runSkill(dynamicSkill, skillArgs && typeof skillArgs === "object" ? skillArgs : {});
+      if (result.ok) {
+        // Só resolve (fecha) o overlay de forge_skill numa confirmação de verdade — uma
+        // falha aqui NÃO fecha nada, ela ainda vai tentar edit_skill + test_skill de novo,
+        // e o usuário pediu overlay em tela o tempo todo enquanto isso roda.
+        markForgeOverlayResolved();
+        sendToDaemon({ cmd: "skill_evolution_resolve", skillName: trimmedName, success: true })
+          .catch((err) => console.error("[test_skill] skill_evolution_resolve falhou (daemon offline?):", err.message));
+      }
+      return formatSkillResult(result);
+    } catch (err) {
+      console.error("[test_skill] failed:", err);
+      return `Test call failed: ${err.message}`;
+    }
+  }
+
+  if (name === "forge_skill_status") {
+    try {
+      const { line, kanji } = JSON.parse(rawArgs);
+      sendToDaemon({ cmd: "skill_evolution_status", line: line || "", kanji: kanji || "" })
+        .catch((err) => console.error("[forge_skill_status] sendToDaemon falhou (daemon offline?):", err.message));
+      return "Status shown.";
+    } catch (err) {
+      console.error("[forge_skill_status] failed:", err);
+      return "Status update failed (non-fatal, continue the flow).";
+    }
+  }
+
+  if (name === "forge_skill_notice") {
+    try {
+      const { line } = JSON.parse(rawArgs);
+      sendToDaemon({ cmd: "skill_evolution_notice", line: line || "" })
+        .catch((err) => console.error("[forge_skill_notice] sendToDaemon falhou (daemon offline?):", err.message));
+      return "Notice shown.";
+    } catch (err) {
+      console.error("[forge_skill_notice] failed:", err);
+      return "Notice failed (non-fatal, continue the flow).";
+    }
+  }
+
+  if (name === "forge_skill_failure") {
+    try {
+      const { line } = JSON.parse(rawArgs);
+      sendToDaemon({ cmd: "skill_evolution_failure", line: line || "" })
+        .catch((err) => console.error("[forge_skill_failure] sendToDaemon falhou (daemon offline?):", err.message));
+      return "Failure screen shown.";
+    } catch (err) {
+      console.error("[forge_skill_failure] failed:", err);
+      return "Failure screen failed (non-fatal, continue the flow).";
+    }
+  }
+
+  if (name === "forge_skill_complete") {
+    try {
+      const { skillName, success } = JSON.parse(rawArgs);
+      const trimmedName = (skillName ?? "").trim();
+      markForgeOverlayResolved();
+      sendToDaemon({ cmd: "skill_evolution_resolve", skillName: trimmedName, success: success !== false })
+        .catch((err) => console.error("[forge_skill_complete] sendToDaemon falhou (daemon offline?):", err.message));
+      return `Overlay resolved for "${trimmedName}".`;
+    } catch (err) {
+      console.error("[forge_skill_complete] failed:", err);
+      return "Resolve failed (non-fatal).";
     }
   }
 
@@ -3717,206 +3695,6 @@ async function executeTool(
     }
   }
 
-  if (name === "generate_pixel_art_pro") {
-    try {
-      const {
-        description,
-        width = 64,
-        height = 64,
-        reference_filenames = [],
-        style_filename,
-      } = JSON.parse(rawArgs);
-      if (!description?.trim()) return "No description provided.";
-      console.log(
-        "[generate_pixel_art_pro]",
-        description.trim(),
-        `${width}x${height}`,
-        { refs: reference_filenames, style: style_filename },
-      );
-      sendEvent({ type: "tool_call", name: "generate_pixel_art_pro", detail: description.trim() });
-      const referenceBuffers = await Promise.all(
-        reference_filenames
-          .slice(0, 4)
-          .map((f) => readFile(resolve(uploadDir, f))),
-      );
-      let styleBuffer = null;
-      if (style_filename?.trim()) {
-        styleBuffer = await readFile(resolve(uploadDir, style_filename.trim()));
-      }
-      const results = await generateImagePro(
-        description.trim(),
-        width,
-        height,
-        referenceBuffers,
-        reference_filenames.slice(0, 4),
-        styleBuffer,
-        style_filename ?? null,
-      );
-      console.log(`[generate_pixel_art_pro] ${results.length} image(s) returned`);
-      sendEvent({ type: "generated_images", filenames: results });
-      collectedImages.push(...results);
-      return `Generated ${results.length} pixel art image(s). All displayed above.`;
-    } catch (err) {
-      console.error("[generate_pixel_art_pro] failed:", err);
-      sendEvent({
-        type: "tool_error",
-        tool: "generate_pixel_art_pro",
-        message: err.message,
-      });
-      return `generate_pixel_art_pro failed: ${err.message}`;
-    }
-  }
-
-  if (name === "generate_pixel_art") {
-    try {
-      const { description, width = 64, height = 64 } = JSON.parse(rawArgs);
-      if (!description?.trim()) return "No description provided.";
-      console.log(
-        "[generate_pixel_art]",
-        description.trim(),
-        `${width}x${height}`,
-      );
-      sendEvent({ type: "tool_call", name: "generate_pixel_art", detail: description.trim() });
-      const filename = await generatePixelArt(
-        description.trim(),
-        width,
-        height,
-      );
-      sendEvent({ type: "generated_images", filenames: [filename] });
-      collectedImages.push(filename);
-      return `Pixel art generated: ${filename}`;
-    } catch (err) {
-      console.error("[generate_pixel_art] failed:", err);
-      sendEvent({
-        type: "tool_error",
-        tool: "generate_pixel_art",
-        message: err.message,
-      });
-      return `Pixel art generation failed: ${err.message}`;
-    }
-  }
-
-  if (name === "convert_to_pixel_art") {
-    try {
-      const {
-        filename,
-        output_width = 64,
-        output_height = 64,
-      } = JSON.parse(rawArgs);
-      if (!filename?.trim()) return "No filename provided.";
-      console.log(
-        "[convert_to_pixel_art]",
-        filename,
-        `${output_width}x${output_height}`,
-      );
-      sendEvent({ type: "tool_call", name: "convert_to_pixel_art" });
-      const buffer = await readFile(resolve(uploadDir, filename));
-      const result = await convertToPixelArt(
-        buffer,
-        filename,
-        output_width,
-        output_height,
-      );
-      sendEvent({ type: "generated_images", filenames: [result] });
-      collectedImages.push(result);
-      return `Converted to pixel art: ${result}`;
-    } catch (err) {
-      console.error("[convert_to_pixel_art] failed:", err);
-      sendEvent({
-        type: "tool_error",
-        tool: "convert_to_pixel_art",
-        message: err.message,
-      });
-      return `Conversion failed: ${err.message}`;
-    }
-  }
-
-  if (name === "convert_to_pixel_art_pro") {
-    try {
-      const { filename, description = "" } = JSON.parse(rawArgs);
-      if (!filename?.trim()) return "No filename provided.";
-      console.log("[convert_to_pixel_art_pro]", filename);
-      sendEvent({ type: "tool_call", name: "convert_to_pixel_art_pro" });
-      const buffer = await readFile(resolve(uploadDir, filename));
-      const result = await convertToPixelArtPro(buffer, filename, description);
-      sendEvent({ type: "generated_images", filenames: [result] });
-      collectedImages.push(result);
-      return `Converted to pixel art (pro): ${result}`;
-    } catch (err) {
-      console.error("[convert_to_pixel_art_pro] failed:", err);
-      sendEvent({
-        type: "tool_error",
-        tool: "convert_to_pixel_art_pro",
-        message: err.message,
-      });
-      return `Pro conversion failed: ${err.message}`;
-    }
-  }
-
-  if (name === "remove_background") {
-    try {
-      const { filename, complex = false } = JSON.parse(rawArgs);
-      if (!filename?.trim()) return "No filename provided.";
-      console.log(
-        "[remove_background]",
-        filename,
-        complex ? "complex" : "simple",
-      );
-      sendEvent({ type: "tool_call", name: "remove_background" });
-      const buffer = await readFile(resolve(uploadDir, filename));
-      const result = await removeBackground(buffer, filename, complex);
-      sendEvent({ type: "generated_images", filenames: [result] });
-      collectedImages.push(result);
-      return `Background removed: ${result}`;
-    } catch (err) {
-      console.error("[remove_background] failed:", err);
-      sendEvent({
-        type: "tool_error",
-        tool: "remove_background",
-        message: err.message,
-      });
-      return `Background removal failed: ${err.message}`;
-    }
-  }
-
-  if (name === "generate_with_style") {
-    try {
-      const {
-        filenames,
-        description,
-        width = 64,
-        height = 64,
-      } = JSON.parse(rawArgs);
-      if (!Array.isArray(filenames) || filenames.length === 0)
-        return "No filenames provided.";
-      if (!description?.trim()) return "No description provided.";
-      console.log("[generate_with_style]", filenames, description.trim());
-      sendEvent({ type: "tool_call", name: "generate_with_style" });
-      const buffers = await Promise.all(
-        filenames.slice(0, 4).map((f) => readFile(resolve(uploadDir, f))),
-      );
-      const results = await generateWithStyle(
-        buffers,
-        filenames.slice(0, 4),
-        description.trim(),
-        width,
-        height,
-      );
-      console.log(`[generate_with_style] ${results.length} image(s) returned`);
-      sendEvent({ type: "generated_images", filenames: results });
-      collectedImages.push(...results);
-      return `Generated ${results.length} pixel art image(s) with style. All images are displayed above.`;
-    } catch (err) {
-      console.error("[generate_with_style] failed:", err);
-      sendEvent({
-        type: "tool_error",
-        tool: "generate_with_style",
-        message: err.message,
-      });
-      return `Style generation failed: ${err.message}`;
-    }
-  }
-
   if (name === "generate_image") {
     try {
       const { description, pro = false, aspect_ratio } = JSON.parse(rawArgs);
@@ -3931,6 +3709,34 @@ async function executeTool(
       console.error("[generate_image] failed:", err);
       sendEvent({ type: "tool_error", tool: "generate_image", message: err.message });
       return `Image generation failed: ${err.message}`;
+    }
+  }
+
+  if (name === "generate_anime_image") {
+    try {
+      const args = JSON.parse(rawArgs);
+      const { negative_prompt, steps, cfg_scale, model_id } = args;
+      // o modelo chama esse campo de "prompt"; "description" fica como apelido por segurança
+      const prompt = (args.prompt ?? args.description ?? "").trim();
+      if (!prompt) return "NO IMAGE GENERATED — you must pass a non-empty `prompt`. Call the tool again with one.";
+      console.log("[generate_anime_image]", prompt);
+      sendEvent({ type: "tool_call", name: "generate_anime_image", detail: prompt });
+      const results = await generatePixaiImage(prompt, {
+        ...(negative_prompt?.trim() && { negativePrompts: negative_prompt.trim() }),
+        ...(steps && { samplingSteps: steps }),
+        ...(cfg_scale && { cfgScale: cfg_scale }),
+        ...(model_id?.trim() && { modelId: model_id.trim() }),
+      });
+      sendEvent({ type: "generated_images", filenames: results });
+      collectedImages.push(...results);
+      return `Generated ${results.length} anime image(s). All displayed above.`;
+    } catch (err) {
+      console.error("[generate_anime_image] failed:", err);
+      sendEvent({ type: "tool_error", tool: "generate_anime_image", message: err.message });
+      if (err.moderated) {
+        return `NO IMAGE GENERATED — ${err.message} This is PixAI's server-side filter on their end, not a limit of yours and not a bug in elfie: the request never reached the model. Tell the user plainly that PixAI refused the prompt. A different checkpoint (some PixAI models are rated for adult content) or different wording may pass, but do not silently retry the same thing.`;
+      }
+      return `NO IMAGE GENERATED — PixAI failed: ${err.message}. Tell the user it failed; do NOT pretend an image was produced.`;
     }
   }
 
@@ -5090,7 +4896,7 @@ export async function deleteChat(req, res) {
 }
 
 export async function runAgentTurn({
-  chat, char, settings, text, imageFilenames = [], forcePixelLab = false,
+  chat, char, settings, text, imageFilenames = [],
   forceThinking = false, forcePro = false, isFirstMessage = false, sendEvent, signal,
   styleHint = "",
 }) {
@@ -5098,12 +4904,8 @@ export async function runAgentTurn({
   const textForClassification = text || "(imagem enviada)";
   const turnStart = Date.now();
 
-  const pixelLabMode =
-    forcePixelLab ||
-    (imageFilenames.length > 0 && isPixelLabIntent(textForClassification));
-
   const deepSeekVisionTurn =
-    imageFilenames.length > 0 && !pixelLabMode && settings?.llmProvider === "deepseek";
+    imageFilenames.length > 0 && settings?.llmProvider === "deepseek";
 
   const { messages: gapAnnotatedHistory, lastAt: lastHistoryMessageAt } =
     withTimeGapNotes(chat.messages.slice(0, -1));
@@ -5115,30 +4917,17 @@ export async function runAgentTurn({
             role: m.role,
             content: m.imageFilenames?.length > 0
               ? buildHistoricalText(m.content, m.imageFilenames)
-              : m.content || "",
+              // Respostas antigas dela podem carregar marcação de anexo forjada, de antes
+              // do saneamento existir. Se voltarem no histórico ela imita de novo, então
+              // saem aqui também — sem mexer no que está gravado no banco.
+              : (m.role === "assistant" ? stripFakeAttachments(m.content || "", []) : m.content || ""),
             toolLog: m.toolLog,
           }
     )
   );
 
   let currentContent;
-  if (pixelLabMode) {
-    const parts = [];
-    if (forcePixelLab)
-      parts.push(
-        "[INSTRUÇÃO: use obrigatoriamente uma ferramenta PixelLab agora]",
-      );
-    if (imageFilenames.length > 0) {
-      const fileList = imageFilenames
-        .map((f, i) => `  imagem_${i + 1} = "${f}"`)
-        .join("\n");
-      parts.push(
-        `[IMAGENS DISPONÍVEIS PARA PIXELLAB]\nCopie estes filenames EXATAMENTE na chamada da ferramenta — não invente nem altere:\n${fileList}`,
-      );
-    }
-    const hint = parts.join("\n");
-    currentContent = text ? `${text}\n\n${hint}` : hint;
-  } else if (deepSeekVisionTurn) {
+  if (deepSeekVisionTurn) {
     currentContent = await buildUserContentVision(text, imageFilenames);
   } else {
     currentContent = await buildUserContent(text, imageFilenames);
@@ -5149,7 +4938,7 @@ export async function runAgentTurn({
     { role: "user", content: currentContent },
   ];
 
-  const characterModel = char?.model?.trim() || "";
+  const characterModel = getCharacterModel(char);
   const charName = char?.name || settings?.aiName || "Elfie";
   let model = resolveModel(characterModel, forcePro, deepSeekVisionTurn);
   broadcastEvent({ type: 'stream_activity', chatId, activity: null });
@@ -5171,11 +4960,11 @@ export async function runAgentTurn({
   const openedPackageIds = new Set();
   const toolsGate = { open: !!chat.toolsOpen };
   const toolsForThisTurn = () => ((settings?.unlimitedTools || toolsGate.open)
-    ? [...withFishAudioHint(EAGER_TOOLS), ...visibleDynamicTools(skillToolState, openedPackageIds)]
-    : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState)]);
+    ? [...withFishAudioHint(withImageToolGates(EAGER_TOOLS)), ...visibleDynamicTools(skillToolState, openedPackageIds)]
+    : [OPEN_TOOLS_TOOL, ...withImageToolGates(ALWAYS_VISIBLE_TOOLS), ...alwaysVisibleDynamicTools(skillToolState)]);
   const continuationToolsForThisTurn = () => ((settings?.unlimitedTools || toolsGate.open)
-    ? [...withFishAudioHint(EAGER_CONTINUATION_TOOLS), ...visibleDynamicTools(skillToolState, openedPackageIds)]
-    : [OPEN_TOOLS_TOOL, ...ALWAYS_VISIBLE_TOOLS, ...alwaysVisibleDynamicTools(skillToolState)]);
+    ? [...withFishAudioHint(withImageToolGates(EAGER_CONTINUATION_TOOLS)), ...visibleDynamicTools(skillToolState, openedPackageIds)]
+    : [OPEN_TOOLS_TOOL, ...withImageToolGates(ALWAYS_VISIBLE_TOOLS), ...alwaysVisibleDynamicTools(skillToolState)]);
 
   console.log(`\n── sendMessage ──────────────────────────────`);
   console.log(`  message:  "${textForClassification.slice(0, 60)}"`);
@@ -5614,6 +5403,7 @@ export async function runAgentTurn({
     sendEvent({ type: "search_results", sources: collectedSources });
   }
 
+  fullText = stripFakeAttachments(fullText, collectedImages);
   const textChunks = splitAiText(fullText);
   const hasMedia = collectedImages.length > 0 || collectedGifs.length > 0 || collectedVoiceNotes.length > 0;
   if (textChunks.length <= 1 || hasMedia) {
@@ -5656,6 +5446,11 @@ export async function runAgentTurn({
   ingestChatTail(chat._id).catch((err) => console.error("[chatHistoryIngest]", err.message));
   logTiming('runAgentTurn WHOLE TURN (message in -> reply persisted)', turnStart);
 
+  // Turno acabou: se um forge_skill ficou com o overlay aberto (ela encerrou sem um
+  // test_skill bem-sucedido nem forge_skill_complete), fecha agora em vez de deixar a
+  // tela pendurada até o teto de inatividade do próprio overlay.
+  closeForgeOverlayIfOpen();
+
   sendEvent({
     type: "done",
     chatTitle: chat.title,
@@ -5697,7 +5492,7 @@ export async function runAgentTurn({
 }
 
 export async function sendMessage(req, res) {
-  const { content = "", imageFilenames = [], voiceNotes = [], forcePixelLab = false, forceNeuro = false, forceThinking = false, forcePro = false } = req.body;
+  const { content = "", imageFilenames = [], voiceNotes = [], forceNeuro = false, forceThinking = false, forcePro = false } = req.body;
   const text = typeof content === "string" ? content.trim() : "";
 
   if (
@@ -5793,7 +5588,7 @@ export async function sendMessage(req, res) {
     }
 
     await runAgentTurn({
-      chat, char, settings, text, imageFilenames, forcePixelLab, forceThinking, forcePro,
+      chat, char, settings, text, imageFilenames, forceThinking, forcePro,
       isFirstMessage, sendEvent, signal: streamAc.signal,
     });
   } catch (err) {
@@ -5806,13 +5601,39 @@ export async function sendMessage(req, res) {
 }
 
 
+// Rubrica de roleplay que o modelo escreve por hábito (*sorri*, *(pausa breve, tom
+// calmo)*, (sussurrando)). Precisa ser REMOVIDA, não desembrulhada: o de-markdown abaixo
+// tira só os asteriscos e mantém o conteúdo, então "*sorri*" virava "sorri" e o TTS
+// falava a palavra em voz alta — a direção de cena virava fala. Só as formas que não têm
+// como ser ênfase legítima entram aqui:
+//   *(...)*        asterisco + parênteses, nunca é ênfase
+//   *...*  sozinho  quando o trecho inteiro a sintetizar é só isso, não sobra fala nenhuma
+//   (...)  sozinho  idem
+// Ênfase inline de verdade ("isso é *muito* importante") continua sendo desembrulhada
+// logo abaixo, com a palavra preservada.
+const STAGE_DIRECTION_PARENS_RE = /\*\([^)]*\)\*/g;
+const STANDALONE_STAGE_DIRECTION_RE = /^\s*(?:\*[^*]+\*|\([^)]*\))\s*$/;
+// Rubrica no INÍCIO seguida de fala de verdade ("*suspira* Que cansaço.") — a forma mais
+// comum de todas. O que separa isso de ênfase legítima ("*Muito* importante isso") é a
+// gramática: a rubrica não faz parte da frase, então o que vem depois começa uma frase
+// NOVA (maiúscula); a ênfase é uma palavra DENTRO da frase, então a continuação vem em
+// minúscula. Sem esse teste, ou vazava "suspira" pro TTS ou comia a palavra enfatizada.
+const LEADING_STAGE_DIRECTION_RE = /^\s*\*[^*]+\*\s+(?=[A-ZÀ-Þ])/;
+
+function stripStageDirections(text) {
+  const withoutParens = text.replace(STAGE_DIRECTION_PARENS_RE, " ");
+  if (STANDALONE_STAGE_DIRECTION_RE.test(withoutParens)) return "";
+  return withoutParens.replace(LEADING_STAGE_DIRECTION_RE, "");
+}
+
 async function synthesizeVoiceText(text, char, fishStreamer) {
-  const clean = text
+  const clean = stripStageDirections(text)
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/\*(.+?)\*/g, "$1")
     .replace(/`(.+?)`/g, "$1")
     .replace(/^#+\s+/gm, "")
     .replace(/^[-*]\s+/gm, "")
+    .replace(/[ \t]{2,}/g, " ")
     .trim();
   if (!clean) return null;
 
@@ -5913,13 +5734,21 @@ const VOICE_ADDENDUM =
   "several tool calls (search, run a command, try again, refine it...), work through them QUIETLY — don't " +
   "narrate each attempt out loud (\"deixa eu tentar isso\", \"agora vou verificar aquilo\", \"vou tentar de outro " +
   "jeito\"...). One short acknowledgment at the start is enough (if any). Then go silent through however many " +
-  "tool rounds it takes, and speak again only once with the actual final answer — still 1-3 sentences." +
+  "tool rounds it takes, and speak again only once with the actual final answer — still 1-3 sentences. " +
+  "EXCEPTIONS: forge_skill, forge_skill_status, forge_skill_notice, and forge_skill_failure are meant to be " +
+  "narrated — say great_sage_line/line out loud, in your Great Sage register, right as you call each one." +
   "\n\nOVERRIDE — NO CHAT BUBBLES HERE: ignore the MESSAGE FORMATTING instruction above about splitting " +
   "replies into multiple bubbles with blank lines. That's a texting convention — spoken out loud it comes " +
   "across as several separate, disjointed replies instead of one thought, especially after a few failed tool " +
   "attempts (don't restate \"não achei\"/\"deixa eu tentar\" in slightly different words for each attempt — " +
   "if it didn't work, say so ONCE, briefly). Every voice reply is ONE continuous utterance, never split by " +
-  "blank lines, no matter how many tool rounds it took to get there.";
+  "blank lines, no matter how many tool rounds it took to get there." +
+  "\n\nNO STAGE DIRECTIONS: everything you write here gets spoken out loud — there is no silent text. NEVER " +
+  "write roleplay stage directions, scene descriptions, actions or tone notes in asterisks or parentheses " +
+  "(e.g. *(pausa breve, tom calmo)*, *sorri*, *suspira*, (sussurrando)). They don't read as directions, they " +
+  "just get read aloud as words. To convey a pause or an emotion, do it through HOW you speak — punctuation, " +
+  "sentence rhythm, and (when your TTS supports them) the inline emotion tags described elsewhere in this " +
+  "prompt — never by describing the action.";
 
 const FISHAUDIO_TAG_HINT =
   "\n\n[FISH AUDIO TTS] Your voice is synthesized by Fish Audio, which understands inline emotion/tone " +
@@ -6064,7 +5893,7 @@ export async function voiceRespond(req, res) {
     const { char, settings } = await loadActiveChar();
     const charName = char?.name || settings?.aiName || "Elfie";
     const chatId = chat._id.toString();
-    const characterModel = char?.model?.trim() || "";
+    const characterModel = getCharacterModel(char);
     const voiceModel = getVoiceModel(characterModel);
     fishStreamer = getTTSProvider() === "fishaudio" ? createFishAudioStreamer(char?.voiceId) : null;
     const speech = createSpeechDispatcher(char, sendEvent, fishStreamer);
@@ -6072,7 +5901,7 @@ export async function voiceRespond(req, res) {
     const prevMessages = mergeConsecutiveAssistant(
       chat.messages.slice(0, -1).map((m) => ({
         role: m.role,
-        content: m.content || "",
+        content: m.role === "assistant" ? stripFakeAttachments(m.content || "", []) : m.content || "",
       }))
     );
 
@@ -6404,6 +6233,9 @@ export async function voiceRespond(req, res) {
     console.error("[voiceRespond]", err);
     sendEvent({ type: "error", message: err.message });
   } finally {
+    // No finally (não só no caminho feliz) de propósito: um turno que morreu por erro ou
+    // foi abortado no meio de um forge é justamente onde o overlay ficava preso na tela.
+    closeForgeOverlayIfOpen();
     if (fishStreamer) await fishStreamer.close().catch(() => {});
     res.end();
   }

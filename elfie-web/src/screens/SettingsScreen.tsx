@@ -1,4 +1,4 @@
-import { BookOpen, Brain, Bug, Check, CheckCircle2, ChevronDown, ChevronLeft, Clock, Copy, Cpu, Eye, ExternalLink, FileText, Folder, MapPin, Mic, Network, Package, Palette, Pencil, Play, Plug, Plus, RefreshCw, Search, Send, Trash2, Unlink, User, Users, Webhook, Workflow as FlowIcon, X } from 'lucide-react';
+import { AlertTriangle, BookOpen, Brain, Bug, Check, CheckCircle2, ChevronDown, ChevronLeft, Clock, Copy, Cpu, Database, Download, Eye, ExternalLink, FileText, Folder, MapPin, Mic, Network, Package, Palette, Pencil, Play, Plug, Plus, RefreshCw, Search, Send, Trash2, Unlink, Upload, User, Users, Webhook, Workflow as FlowIcon, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import DebugPanel from '../components/DebugPanel';
@@ -19,6 +19,7 @@ import TagChipInput from '../components/TagChipInput';
 import { Routine, useRoutinesStore } from '../stores/routinesStore';
 import { Workflow, useWorkflowsStore } from '../stores/workflowsStore';
 import WorkflowEditor from '../components/WorkflowEditor';
+import PixaiModelPicker, { PixaiLora, PixaiSelection } from '../components/PixaiModelPicker';
 
 const DEEPSEEK_MODELS = [
   { label: 'DeepSeek Flash', value: 'deepseek-v4-flash' },
@@ -35,6 +36,9 @@ const PRESET_MODELS = [
   { label: 'Llama 3.1 70B', value: 'meta-llama/llama-3.1-70b-instruct' },
   { label: 'Cydonia 24B', value: 'thedrummer/cydonia-24b-v4.1' },
 ];
+
+const fieldLabel = 'text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0';
+const smallInput = 'text-white text-[13px] bg-foreground border border-foreground rounded-xl px-3 py-2 outline-none w-full placeholder:text-gray-400';
 
 const Spinner = () => (
   <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent spin" />
@@ -118,8 +122,8 @@ const MemoryItem = memo(({ text, onDelete, onEdit }: {
 });
 
 
-const SavedVoicesPicker = memo(({ value, onChange }: {
-  value: string; onChange: (id: string) => void;
+const SavedVoicesPicker = memo(({ value, onChange, triggerClassName }: {
+  value: string; onChange: (id: string) => void; triggerClassName?: string;
 }) => {
   const { voicePresets } = useVoicePresetsStore();
   const [open, setOpen] = useState(false);
@@ -140,7 +144,7 @@ const SavedVoicesPicker = memo(({ value, onChange }: {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center justify-between gap-2 w-full bg-foreground border border-foreground rounded-xl px-4 py-2.5 cursor-pointer text-left"
+        className={`flex items-center justify-between gap-2 w-full rounded-xl px-4 py-2.5 cursor-pointer text-left ${triggerClassName ?? 'bg-foreground border border-foreground'}`}
       >
         <div className="flex items-center gap-2 min-w-0">
           <Mic size={13} className="text-gray-400 flex-shrink-0" />
@@ -331,9 +335,68 @@ const PhotoCropModal = memo(({ src, onCancel, onCrop }: {
 });
 
 
-const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
+const sectionInput =
+  'text-white text-[13px] bg-background border border-background rounded-xl px-3.5 py-2.5 outline-none w-full placeholder:text-gray-400';
+const sectionGroupLabel = 'text-gray-400 text-[10px] font-bold tracking-widest m-0 mb-2';
+
+const CHARACTER_FILE_EXT = '.elfie-character.json';
+
+type BackupInfo = {
+  collections: { name: string; count: number }[];
+  documents: number;
+  uploads: { files: number; bytes: number };
+  knowledge: { files: number; bytes: number };
+  snapshotDir: string;
+  snapshots: { name: string; path: string; bytes: number }[];
+};
+
+type RestoreResult = {
+  restored: Record<string, number>;
+  uploadFiles: number;
+  knowledgeFiles: number;
+  needsReindex: boolean;
+  snapshot: string;
+  exportedAt: string | null;
+};
+
+const formatBytes = (bytes: number) => {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+};
+
+const slugifyName = (name: string) =>
+  name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'character';
+
+const SettingsSection = ({ icon, title, subtitle, action, children }: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle?: React.ReactNode;
+  action?: React.ReactNode;
+  children?: React.ReactNode;
+}) => (
+  <section className="rounded-2xl bg-foreground p-4 mb-2.5">
+    <div className="flex items-start gap-3">
+      <div className="w-7 h-7 rounded-lg bg-background flex items-center justify-center flex-shrink-0 text-gray-300">
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-white font-semibold text-[13px] m-0 leading-[1.6]">{title}</p>
+        {subtitle && <p className="text-gray-300 text-[11px] leading-[1.5] mt-1 m-0">{subtitle}</p>}
+      </div>
+      {action && <div className="flex-shrink-0 ml-1">{action}</div>}
+    </div>
+    {children && <div className="mt-3.5">{children}</div>}
+  </section>
+);
+
+
+const CharacterEditor = memo(({ character, ttsProvider, llmProvider, onClose, onSaved }: {
   character: Partial<Character> | null;
   ttsProvider: 'elevenlabs' | 'fishaudio';
+  llmProvider: 'openrouter' | 'deepseek' | 'inworld';
   onClose: () => void;
   onSaved: () => void;
 }) => {
@@ -342,9 +405,13 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
   const [model, setModel] = useState(character?.model ?? '');
   const [voiceId, setVoiceId] = useState(character?.voiceId ?? '');
   const [greatSageWarnings, setGreatSageWarnings] = useState(character?.greatSageWarnings !== false);
+  const [inworldRealtimeEnabled, setInworldRealtimeEnabled] = useState(!!character?.inworldRealtimeEnabled);
+  const [inworldVoice, setInworldVoice] = useState(character?.inworldVoice ?? '');
+  const [inworldLLMModel, setInworldLLMModel] = useState(character?.inworldLLMModel ?? '');
   const [localPhoto, setLocalPhoto] = useState<{ uri: string; base64: string } | null>(null);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const photoUri = localPhoto?.uri ?? (character?.photo ? `${API_BASE}/files/${character.photo}` : null);
@@ -371,7 +438,10 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
     if (!name.trim()) { window.alert('Name is required.'); return; }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { name: name.trim(), personality, model, voiceId, greatSageWarnings };
+      const body: Record<string, unknown> = {
+        name: name.trim(), personality, model, voiceId, greatSageWarnings,
+        inworldRealtimeEnabled, inworldVoice, inworldLLMModel,
+      };
       if (localPhoto) body.photoBase64 = localPhoto.base64;
       const isNew = !character?._id;
       const url = isNew ? `${API_BASE}/api/characters` : `${API_BASE}/api/characters/${character!._id}`;
@@ -384,7 +454,27 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
       onSaved();
     } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
-  }, [name, personality, model, voiceId, greatSageWarnings, localPhoto, character, onSaved]);
+  }, [name, personality, model, voiceId, greatSageWarnings, inworldRealtimeEnabled, inworldVoice, inworldLLMModel, localPhoto, character, onSaved]);
+
+  const exportCharacter = useCallback(async () => {
+    if (!character?._id) return;
+    setExporting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/characters/${character._id}/export`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${slugifyName(data?.character?.name ?? character.name ?? '')}${CHARACTER_FILE_EXT}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch { window.alert('Failed to export.'); }
+    finally { setExporting(false); }
+  }, [character]);
 
   const deleteCharacter = useCallback(async () => {
     if (!character?._id) return;
@@ -424,57 +514,74 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        <div className="flex items-center gap-5 mb-6">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="relative bg-transparent border-none cursor-pointer p-0 flex-shrink-0"
-          >
-            <div
-              className="overflow-hidden flex items-center justify-center bg-foreground"
-              style={{ width: 72, height: 72, borderRadius: 18 }}
-            >
-              {photoUri
-                ? <img src={photoUri} style={{ width: 72, height: 72, objectFit: 'cover' }} alt="" />
-                : <User size={26} color="#555" />
-              }
-            </div>
-            <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-accent border-2 border-background flex items-center justify-center">
-              <Pencil size={9} color="#fff" />
-            </div>
-          </button>
-          <div className="flex-1 min-w-0">
-            <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0">NAME</p>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Character name"
-              className="text-white text-[17px] font-bold bg-transparent border-none outline-none w-full placeholder:text-gray-400"
-            />
-          </div>
-        </div>
+        <p className={sectionGroupLabel}>BASICS</p>
 
-        <div className="mb-5">
-          <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">PERSONALITY</p>
+        <section className="rounded-2xl bg-foreground p-4 mb-2.5">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="relative bg-transparent border-none cursor-pointer p-0 flex-shrink-0"
+            >
+              <div
+                className="overflow-hidden flex items-center justify-center bg-background"
+                style={{ width: 64, height: 64, borderRadius: 16 }}
+              >
+                {photoUri
+                  ? <img src={photoUri} style={{ width: 64, height: 64, objectFit: 'cover' }} alt="" />
+                  : <User size={24} color="#555" />
+                }
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-accent border-2 border-foreground flex items-center justify-center">
+                <Pencil size={9} color="#fff" />
+              </div>
+            </button>
+            <div className="flex-1 min-w-0">
+              <p className={fieldLabel}>NAME</p>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Character name"
+                className="text-white text-[17px] font-bold bg-transparent border-none outline-none w-full placeholder:text-gray-400"
+              />
+              <p className="text-gray-300 text-[11px] mt-1 m-0">Tap the photo to change the avatar.</p>
+            </div>
+          </div>
+        </section>
+
+        <SettingsSection
+          icon={<Brain size={14} />}
+          title="Personality"
+          subtitle="Describes who she is and how she talks. Left empty, the server default personality is used."
+        >
           <textarea
             value={personality}
             onChange={(e) => setPersonality(e.target.value)}
             placeholder="Describe the personality, tone, and vibe..."
-            className="text-white text-[13px] border border-foreground rounded-2xl px-4 py-3 outline-none resize-none w-full placeholder:text-gray-400 bg-foreground"
-            style={{ minHeight: 220 }}
+            className="text-white text-[13px] bg-background border border-background rounded-xl px-3.5 py-3 outline-none resize-none w-full placeholder:text-gray-400 leading-[1.55]"
+            style={{ minHeight: 200 }}
           />
-          <p className="text-gray-300 text-[11px] mt-1.5 m-0">If empty, uses the default personality.</p>
-        </div>
+        </SettingsSection>
 
-        <div className="mb-5">
-          <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">AI MODEL</p>
+        <p className={`${sectionGroupLabel} mt-6`}>INTELLIGENCE</p>
+
+        <SettingsSection
+          icon={<Cpu size={14} />}
+          title="AI model"
+          subtitle={llmProvider === 'inworld'
+            ? 'OpenRouter / DeepSeek model id. Inactive right now — the AI Provider is set to Inworld, so text chat uses the Inworld LLM model below. It applies again if you switch the provider back.'
+            : 'Model id used for text chat. Left empty, the server default is used.'}
+        >
           <input
             type="text"
             value={model}
             onChange={(e) => setModel(e.target.value)}
             placeholder="Server default"
-            className="text-white text-[13px] bg-transparent border-b border-foreground outline-none w-full pb-2 mb-3 placeholder:text-gray-400"
+            className={sectionInput}
+            autoComplete="off"
+            spellCheck={false}
           />
+          <p className="text-gray-400 text-[10px] font-bold tracking-widest mt-3.5 mb-2 m-0">PRESETS</p>
           <div className="flex flex-wrap gap-1.5">
             {PRESET_MODELS.map((m) => (
               <motion.button
@@ -483,53 +590,140 @@ const CharacterEditor = memo(({ character, ttsProvider, onClose, onSaved }: {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className={`px-3 py-1 rounded-full text-[11px] font-semibold border-none cursor-pointer transition-colors ${
-                  model === m.value ? 'bg-accent text-white' : 'bg-foreground text-gray-400 hover:text-gray-200'
+                  model === m.value ? 'bg-accent text-white' : 'bg-background text-gray-400 hover:text-gray-200'
                 }`}
               >
                 {m.label}
               </motion.button>
             ))}
           </div>
-        </div>
+        </SettingsSection>
 
-        <div className="mb-5">
-          <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">
-            VOICE ({ttsProvider === 'fishaudio' ? 'FISH AUDIO' : 'ELEVENLABS'})
-          </p>
+        {(inworldRealtimeEnabled || llmProvider === 'inworld') && (
+          <SettingsSection
+            icon={<Network size={14} />}
+            title="Inworld LLM model"
+            subtitle="Routed through the Inworld Router — any of their models (e.g. anthropic/claude-opus-4-5, google/gemini-3-pro, openai/gpt-5). Used by the Inworld voice call and by text chat when the AI Provider is set to Inworld."
+          >
+            <input
+              type="text"
+              value={inworldLLMModel}
+              onChange={(e) => setInworldLLMModel(e.target.value)}
+              placeholder="openai/gpt-4o-mini (empty = server default)"
+              className={sectionInput}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </SettingsSection>
+        )}
+
+        <p className={`${sectionGroupLabel} mt-6`}>VOICE</p>
+
+        <SettingsSection
+          icon={<Mic size={14} />}
+          title={`Voice — ${ttsProvider === 'fishaudio' ? 'Fish Audio' : 'ElevenLabs'}`}
+          subtitle={voiceId ? undefined : 'Left empty, the server default voice is used.'}
+        >
           <input
             type="text"
             value={voiceId}
             onChange={(e) => setVoiceId(e.target.value.trim())}
             placeholder={ttsProvider === 'fishaudio' ? 'Model ID (reference_id)' : 'Voice ID (voice_id)'}
-            className="text-white text-[13px] bg-transparent border-b border-foreground outline-none w-full pb-2 mb-3 placeholder:text-gray-400"
+            className={sectionInput}
             autoComplete="off"
             spellCheck={false}
           />
-          <SavedVoicesPicker value={voiceId} onChange={setVoiceId} />
-          {!voiceId && <p className="text-gray-300 text-[11px] mt-1.5 m-0">If empty, uses the server default voice.</p>}
-        </div>
+          <p className="text-gray-400 text-[10px] font-bold tracking-widest mt-3.5 mb-2 m-0">SAVED VOICES</p>
+          <SavedVoicesPicker
+            value={voiceId}
+            onChange={setVoiceId}
+            triggerClassName="bg-background border border-background"
+          />
+        </SettingsSection>
 
-        <div className="mb-5 pt-5 border-t border-foreground flex items-center justify-between">
-          <div>
-            <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0">GREAT SAGE WARNINGS</p>
-            <p className="text-gray-300 text-[11px] m-0 max-w-[320px]">
-              Plays a cue sound and shows a kanji on the floating overlay when this character fires a routine
-              on its own, or starts using a tool during a voice reply.
-            </p>
-          </div>
-          <Switch checked={greatSageWarnings} onChange={() => setGreatSageWarnings((v) => !v)} />
-        </div>
+        <SettingsSection
+          icon={<Plug size={14} />}
+          title="Inworld speech-to-speech (beta)"
+          subtitle="Fast-lane call mode: audio goes straight to Inworld's full-duplex Realtime API (their STT + LLM + TTS in one connection) instead of elfie's usual pipeline. Only a small tool set (list_voices / change_voice) is wired in so far. Needs INWORLD_API_KEY on the server. Works in elfie-web's call screen and in the desktop daemon."
+          action={<Switch checked={inworldRealtimeEnabled} onChange={() => setInworldRealtimeEnabled((v) => !v)} />}
+        >
+          <AnimatePresence initial={false}>
+            {inworldRealtimeEnabled && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">INWORLD VOICE ID</p>
+                <input
+                  type="text"
+                  value={inworldVoice}
+                  onChange={(e) => setInworldVoice(e.target.value)}
+                  placeholder="Clive (empty = server default)"
+                  className={sectionInput}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <p className="text-gray-300 text-[11px] mt-1.5 m-0">
+                  voiceId from the Inworld catalog (platform.inworld.ai or GET /voices/v1/voices).
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </SettingsSection>
+
+        <p className={`${sectionGroupLabel} mt-6`}>BEHAVIOR</p>
+
+        <SettingsSection
+          icon={<Eye size={14} />}
+          title="Great Sage warnings"
+          subtitle="Plays a cue sound and shows a kanji on the floating overlay when this character fires a routine on its own, or starts using a tool during a voice reply."
+          action={<Switch checked={greatSageWarnings} onChange={() => setGreatSageWarnings((v) => !v)} />}
+        />
 
         {character?._id && (
-          <motion.button
-            onClick={deleteCharacter}
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.96 }}
-            className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors"
-          >
-            <X size={12} color="#ff382b" />
-            <span className="text-destructive font-semibold text-[12px]">Delete character</span>
-          </motion.button>
+          <>
+            <p className={`${sectionGroupLabel} mt-6`}>PORTABILITY</p>
+            <SettingsSection
+              icon={<Download size={14} />}
+              title="Export to a file"
+              subtitle="Downloads this character as a .json file — name, photo, personality, model and voice settings. Memories, chat history and your personal data are not included. Exports the version saved on the server, so save your changes first."
+              action={
+                <motion.button
+                  onClick={exportCharacter}
+                  disabled={exporting}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-background hover:bg-background/60 disabled:opacity-50 min-w-[86px] justify-center"
+                >
+                  {exporting
+                    ? <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-300 border-t-transparent spin" />
+                    : <><Download size={12} className="text-gray-300" /><span className="text-gray-300 font-semibold text-[12px]">Export</span></>}
+                </motion.button>
+              }
+            />
+
+            <p className={`${sectionGroupLabel} mt-6`}>DANGER ZONE</p>
+            <section className="rounded-2xl bg-foreground p-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-white font-semibold text-[13px] m-0">Delete this character</p>
+                <p className="text-gray-300 text-[11px] leading-[1.5] mt-1 m-0">
+                  Removes the character permanently. This can't be undone.
+                </p>
+              </div>
+              <motion.button
+                onClick={deleteCharacter}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.96 }}
+                className="flex items-center gap-2 py-2 px-4 rounded-full border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors flex-shrink-0"
+              >
+                <Trash2 size={12} color="#ff382b" />
+                <span className="text-destructive font-semibold text-[12px]">Delete</span>
+              </motion.button>
+            </section>
+          </>
         )}
       </div>
     </div>
@@ -545,8 +739,6 @@ const AUTH_TYPES: [SkillAuthType, string][] = [
   ['none', 'None'], ['bearer', 'Bearer Token'], ['apiKeyHeader', 'Custom header'], ['basic', 'Basic Auth'],
 ];
 
-const fieldLabel = 'text-gray-400 text-[10px] font-bold tracking-widest mb-1.5 m-0';
-const smallInput = 'text-white text-[13px] bg-foreground border border-foreground rounded-xl px-3 py-2 outline-none w-full placeholder:text-gray-400';
 
 function methodColor(method: SkillMethod) {
   switch (method) {
@@ -2112,7 +2304,7 @@ const FileEditor = memo(({ folderName, fileName, onClose, onSaved, onDeleted }: 
 });
 
 
-type Tab = 'personagens' | 'sobre-mim' | 'memoria' | 'provedor' | 'voz' | 'skills' | 'rotinas' | 'automacoes' | 'conhecimento' | 'mind' | 'aparencia' | 'integracoes' | 'debug';
+type Tab = 'personagens' | 'sobre-mim' | 'memoria' | 'provedor' | 'voz' | 'skills' | 'rotinas' | 'automacoes' | 'conhecimento' | 'mind' | 'aparencia' | 'integracoes' | 'backup' | 'debug';
 
 export default function SettingsScreen({ visible, onClose, onCharacterActivated }: {
   visible: boolean;
@@ -2155,9 +2347,14 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
   const [detectingCity, setDetectingCity] = useState(false);
   const [longTermMemory, setLongTermMemory] = useState<string[]>([]);
   const [newMemory, setNewMemory] = useState('');
-  const [llmProvider, setLlmProvider] = useState<'openrouter' | 'deepseek'>('openrouter');
+  const [llmProvider, setLlmProvider] = useState<'openrouter' | 'deepseek' | 'inworld'>('openrouter');
   const [deepseekApiKey, setDeepseekApiKey] = useState('');
   const [deepseekModel, setDeepseekModel] = useState('deepseek-v4-flash');
+  const [inworldModel, setInworldModel] = useState('openai/gpt-4o-mini');
+  const [pixaiToken, setPixaiToken] = useState('');
+  const [pixaiModel, setPixaiModel] = useState<PixaiSelection | null>(null);
+  const [pixaiLoras, setPixaiLoras] = useState<PixaiLora[]>([]);
+  const [showPixaiPicker, setShowPixaiPicker] = useState(false);
   const [unlimitedTools, setUnlimitedTools] = useState(false);
   const [ttsProvider, setTtsProvider] = useState<'elevenlabs' | 'fishaudio'>('elevenlabs');
   const [sttProvider, setSttProvider] = useState<'elevenlabs' | 'fishaudio'>('elevenlabs');
@@ -2178,6 +2375,17 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
   const [showDebug, setShowDebug] = useState(false);
 
   const userPhotoFileRef = useRef<HTMLInputElement>(null);
+  const characterImportRef = useRef<HTMLInputElement>(null);
+  const [importingCharacter, setImportingCharacter] = useState(false);
+
+  const restoreFileRef = useRef<HTMLInputElement>(null);
+  const [backupInfo, setBackupInfo] = useState<BackupInfo | null>(null);
+  const [backupUploads, setBackupUploads] = useState(true);
+  const [backupKnowledge, setBackupKnowledge] = useState(true);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreConfirm, setRestoreConfirm] = useState('');
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -2191,9 +2399,23 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
         setUserPhoto(settings.userPhoto ?? '');
         setLocalUserPhoto(null);
         setUserCity(settings.userCity ?? '');
-        setLlmProvider(settings.llmProvider === 'deepseek' ? 'deepseek' : 'openrouter');
+        setLlmProvider(
+          settings.llmProvider === 'deepseek' || settings.llmProvider === 'inworld'
+            ? settings.llmProvider
+            : 'openrouter',
+        );
         setDeepseekApiKey(settings.deepseekApiKey ?? '');
         setDeepseekModel(settings.deepseekModel || 'deepseek-v4-flash');
+        setInworldModel(settings.inworldModel || 'openai/gpt-4o-mini');
+        setPixaiToken(settings.pixaiToken ?? '');
+        setPixaiModel(settings.pixaiModelId
+          ? {
+              versionId: settings.pixaiModelId,
+              title: settings.pixaiModelTitle || settings.pixaiModelId,
+              baseModelType: settings.pixaiModelBaseType ?? '',
+            }
+          : null);
+        setPixaiLoras(Array.isArray(settings.pixaiLoras) ? settings.pixaiLoras : []);
         setUnlimitedTools(!!settings.unlimitedTools);
         setTtsProvider(settings.ttsProvider === 'fishaudio' ? 'fishaudio' : 'elevenlabs');
         setSttProvider(settings.sttProvider === 'fishaudio' ? 'fishaudio' : 'elevenlabs');
@@ -2221,6 +2443,7 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
   useEffect(() => {
     if (visible) { loadSkills(); loadPackages(); loadVoicePresets(); loadFolders(); loadIntegrations(); loadRoutines(); loadWorkflows(); }
   }, [visible, loadSkills, loadPackages, loadVoicePresets, loadFolders, loadIntegrations, loadRoutines, loadWorkflows]);
+
 
   useEffect(() => {
     if (!visible) return;
@@ -2317,6 +2540,85 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
     } catch (err) { console.error('[activateCharacter]', err); }
   }, [loadSettings, characters, onCharacterActivated]);
 
+  const importCharacterFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportingCharacter(true);
+    try {
+      let payload: unknown;
+      try { payload = JSON.parse(await file.text()); }
+      catch { window.alert('That file is not valid JSON.'); return; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        window.alert('That file is not an elfie character export.');
+        return;
+      }
+
+      const res = await fetch(`${API_BASE}/api/characters/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) { window.alert(data?.error ?? 'Failed to import character.'); return; }
+      await loadSettings();
+    } catch (err) {
+      console.error('[importCharacter]', err);
+      window.alert('Failed to import character.');
+    } finally { setImportingCharacter(false); }
+  }, [loadSettings]);
+
+  const loadBackupInfo = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/backup/info`);
+      if (r.ok) setBackupInfo(await r.json());
+    } catch (err) { console.error('[backupInfo]', err); }
+  }, []);
+
+  const downloadBackup = useCallback(() => {
+    const params = new URLSearchParams();
+    if (!backupUploads) params.set('uploads', '0');
+    if (!backupKnowledge) params.set('knowledge', '0');
+    const qs = params.toString();
+    const a = document.createElement('a');
+    a.href = `${API_BASE}/api/backup/export${qs ? `?${qs}` : ''}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }, [backupUploads, backupKnowledge]);
+
+  const runRestore = useCallback(async () => {
+    if (!restoreFile || restoreConfirm.trim().toUpperCase() !== 'REPLACE') return;
+    setRestoring(true);
+    setRestoreResult(null);
+    try {
+      const form = new FormData();
+      form.append('confirm', 'REPLACE');
+      form.append('backup', restoreFile);
+      const r = await fetch(`${API_BASE}/api/backup/import`, { method: 'POST', body: form });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) { window.alert(data?.error ?? 'Failed to restore the backup.'); return; }
+
+      setRestoreResult(data);
+      setRestoreFile(null);
+      setRestoreConfirm('');
+      await loadSettings();
+      await Promise.all([
+        loadSkills(), loadPackages(), loadVoicePresets(), loadFolders(),
+        loadIntegrations(), loadRoutines(), loadWorkflows(),
+      ]);
+      await loadBackupInfo();
+    } catch (err) {
+      console.error('[restoreBackup]', err);
+      window.alert('Failed to restore the backup.');
+    } finally { setRestoring(false); }
+  }, [restoreFile, restoreConfirm, loadSettings, loadSkills, loadPackages, loadVoicePresets,
+      loadFolders, loadIntegrations, loadRoutines, loadWorkflows, loadBackupInfo]);
+
+  useEffect(() => {
+    if (visible && tab === 'backup') loadBackupInfo();
+  }, [visible, tab, loadBackupInfo]);
+
   const saveSobreMim = useCallback(async () => {
     setSaving(true);
     try {
@@ -2384,13 +2686,19 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
       const r = await fetch(`${API_BASE}/api/settings`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ llmProvider, deepseekApiKey, deepseekModel, unlimitedTools }),
+        body: JSON.stringify({
+          llmProvider, deepseekApiKey, deepseekModel, inworldModel, unlimitedTools, pixaiToken,
+          pixaiModelId: pixaiModel?.versionId ?? '',
+          pixaiModelTitle: pixaiModel?.title ?? '',
+          pixaiModelBaseType: pixaiModel?.baseModelType ?? '',
+          pixaiLoras,
+        }),
       });
       if (!r.ok) throw new Error();
       await loadSettings();
     } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
-  }, [llmProvider, deepseekApiKey, deepseekModel, unlimitedTools, loadSettings]);
+  }, [llmProvider, deepseekApiKey, deepseekModel, inworldModel, unlimitedTools, pixaiToken, pixaiModel, pixaiLoras, loadSettings]);
 
   const saveVoiceSettings = useCallback(async () => {
     setSaving(true);
@@ -2401,9 +2709,10 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
         body: JSON.stringify({ ttsProvider, sttProvider, fishaudioApiKey }),
       });
       if (!r.ok) throw new Error();
+      await loadSettings();
     } catch { window.alert('Failed to save.'); }
     finally { setSaving(false); }
-  }, [ttsProvider, sttProvider, fishaudioApiKey]);
+  }, [ttsProvider, sttProvider, fishaudioApiKey, loadSettings]);
 
   const saveGoogleCredentials = useCallback(async () => {
     setSavingGoogle(true);
@@ -2503,6 +2812,7 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
     { id: 'mind',         label: 'Mind',          icon: <Network size={14} /> },
     { id: 'aparencia',   label: 'Appearance',    icon: <Palette size={14} /> },
     { id: 'integracoes', label: 'Integrations',  icon: <Plug size={14} /> },
+    { id: 'backup',      label: 'Backup',       icon: <Database size={14} /> },
     { id: 'debug',       label: 'Debug',        icon: <Bug size={14} /> },
   ];
 
@@ -2525,6 +2835,7 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
           onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
         >
           <input ref={userPhotoFileRef} type="file" accept="image/*" className="hidden" onChange={handleUserPhotoChange} />
+          <input ref={characterImportRef} type="file" accept="application/json,.json" className="hidden" onChange={importCharacterFile} />
 
           <motion.div
             layout
@@ -2629,6 +2940,7 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
                     <CharacterEditor
                       character={editingCharacter}
                       ttsProvider={ttsProvider}
+                      llmProvider={llmProvider}
                       onClose={() => setEditingCharacter(undefined)}
                       onSaved={async () => { await loadSettings(); setEditingCharacter(undefined); }}
                     />
@@ -2760,15 +3072,28 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="flex items-center justify-between px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
                     <span className="text-white font-semibold text-[14px]">Characters</span>
-                    <motion.button
-                      onClick={() => setEditingCharacter(null)}
-                      whileHover={{ scale: 1.04 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20"
-                    >
-                      <Plus size={12} color="var(--accent)" />
-                      <span className="text-accent font-semibold text-[12px]">New</span>
-                    </motion.button>
+                    <div className="flex items-center gap-2">
+                      <motion.button
+                        onClick={() => characterImportRef.current?.click()}
+                        disabled={importingCharacter}
+                        whileHover={{ scale: 1.04 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-foreground hover:bg-foreground/70 disabled:opacity-50 min-w-[92px] justify-center"
+                      >
+                        {importingCharacter
+                          ? <div className="w-3.5 h-3.5 rounded-full border-2 border-gray-300 border-t-transparent spin" />
+                          : <><Upload size={12} className="text-gray-300" /><span className="text-gray-300 font-semibold text-[12px]">Import</span></>}
+                      </motion.button>
+                      <motion.button
+                        onClick={() => setEditingCharacter(null)}
+                        whileHover={{ scale: 1.04 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20"
+                      >
+                        <Plus size={12} color="var(--accent)" />
+                        <span className="text-accent font-semibold text-[12px]">New</span>
+                      </motion.button>
+                    </div>
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-5">
@@ -2998,7 +3323,7 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
                   <div className="flex-1 overflow-y-auto px-6 py-5">
                     <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-3 m-0">PROVIDER</p>
                     <div className="flex gap-2 mb-6">
-                      {(['openrouter', 'deepseek'] as const).map((p) => (
+                      {(['openrouter', 'deepseek', 'inworld'] as const).map((p) => (
                         <button
                           key={p}
                           onClick={() => setLlmProvider(p)}
@@ -3008,7 +3333,7 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
                               : 'bg-foreground text-gray-400 border-foreground hover:text-gray-200'
                           }`}
                         >
-                          {p === 'openrouter' ? 'OpenRouter' : 'DeepSeek'}
+                          {p === 'openrouter' ? 'OpenRouter' : p === 'deepseek' ? 'DeepSeek' : 'Inworld'}
                         </button>
                       ))}
                     </div>
@@ -3051,11 +3376,141 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
                       </div>
                     )}
 
+                    {llmProvider === 'inworld' && (
+                      <div className="mb-6">
+                        <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">DEFAULT MODEL</p>
+                        <input
+                          type="text"
+                          value={inworldModel}
+                          onChange={(e) => setInworldModel(e.target.value)}
+                          placeholder="openai/gpt-4o-mini"
+                          className="text-white text-[13px] bg-foreground border border-foreground rounded-xl px-4 py-2.5 outline-none w-full placeholder:text-gray-400"
+                          autoComplete="off"
+                        />
+                        <p className="text-gray-500 text-[11px] mt-1.5 m-0">
+                          Any model id the Inworld Router supports (e.g. openai/gpt-4o-mini, anthropic/claude-opus-4-5). Used when a character doesn't have a specific model set.
+                        </p>
+                      </div>
+                    )}
+
                     <p className="text-gray-500 text-[12px] leading-5 m-0">
                       {llmProvider === 'deepseek'
                         ? 'Embeddings still go through OpenRouter.'
+                        : llmProvider === 'inworld'
+                        ? 'Uses the same INWORLD_API_KEY configured on the server (api/.env) — same account as the voice call feature. Embeddings still go through OpenRouter.'
                         : 'Access any model via openrouter.ai.'}
                     </p>
+
+                    <div className="mt-6 pt-5 border-t border-foreground">
+                      <p className="text-white font-semibold text-[13px] m-0">Image generation — PixAI</p>
+                      <p className="text-gray-300 text-[11px] leading-[1.5] mt-1 mb-3">
+                        Powers the anime/manga image tool. PixAI has no public API, so it uses the session
+                        token from the site: open pixai.art logged in, DevTools → Application → Local Storage →
+                        <span className="font-mono"> api.pixai.art:token</span>, and paste the value here.
+                        It expires after about a week — when she says the token was rejected, paste a fresh one.
+                        Leave empty to turn the tool off entirely.
+                      </p>
+
+                      <p className={`${fieldLabel} mb-2`}>PIXAI TOKEN</p>
+                      <input
+                        type="password"
+                        value={pixaiToken}
+                        onChange={(e) => setPixaiToken(e.target.value)}
+                        placeholder="eyJhbGciOi…"
+                        className="text-white text-[13px] bg-foreground border border-foreground rounded-xl px-4 py-2.5 outline-none w-full placeholder:text-gray-400"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+
+                      <div className="flex items-center justify-between mt-4 mb-2">
+                        <p className={`${fieldLabel} mb-0`}>CHECKPOINT &amp; LORAS</p>
+                        <motion.button
+                          onClick={() => setShowPixaiPicker(true)}
+                          disabled={!pixaiToken.trim()}
+                          whileHover={{ scale: 1.04 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-full border-none cursor-pointer transition-colors bg-accent/[0.12] hover:bg-accent/20 disabled:opacity-40"
+                        >
+                          <Search size={11} color="var(--accent)" />
+                          <span className="text-accent font-semibold text-[11px]">Browse</span>
+                        </motion.button>
+                      </div>
+
+                      <div className="rounded-xl bg-foreground p-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="rounded-lg overflow-hidden bg-background flex items-center justify-center flex-shrink-0"
+                            style={{ width: 44, height: 44 }}
+                          >
+                            {pixaiModel?.thumbnail
+                              ? <img src={pixaiModel.thumbnail} alt="" className="w-full h-full object-cover" />
+                              : <Palette size={16} color="#555" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-[13px] font-semibold m-0 truncate">
+                              {pixaiModel?.title ?? 'Moonbeam (server default)'}
+                            </p>
+                            <p className="text-gray-300 text-[11px] mt-0.5 m-0 truncate">
+                              {pixaiModel
+                                ? `${pixaiModel.baseModelType || 'checkpoint'} · ${pixaiModel.versionId}`
+                                : 'No checkpoint picked — falls back to the default model.'}
+                            </p>
+                          </div>
+                          {pixaiModel && (
+                            <button
+                              onClick={() => { setPixaiModel(null); setPixaiLoras([]); }}
+                              className="p-1.5 rounded-full bg-transparent border-none cursor-pointer hover:bg-background flex-shrink-0"
+                              title="Clear"
+                            >
+                              <X size={12} color="#888" />
+                            </button>
+                          )}
+                        </div>
+
+                        {pixaiLoras.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-background">
+                            <p className="text-gray-400 text-[10px] font-bold tracking-widest mb-2 m-0">
+                              LORAS ({pixaiLoras.length})
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {pixaiLoras.map((l) => {
+                                const bad = !!pixaiModel?.baseModelType && !!l.baseModelType
+                                  && l.baseModelType !== pixaiModel.baseModelType;
+                                return (
+                                <span
+                                  key={l.versionId}
+                                  className={`flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full max-w-full ${bad ? 'bg-destructive/[0.12]' : 'bg-background'}`}
+                                  title={bad ? `Trained for ${l.baseModelType}, not ${pixaiModel?.baseModelType} — PixAI will ignore it` : undefined}
+                                >
+                                  {bad && <AlertTriangle size={9} className="text-destructive flex-shrink-0" />}
+                                  <span className={`text-[11px] font-medium truncate max-w-[160px] ${bad ? 'text-gray-400 line-through' : 'text-white'}`}>{l.title}</span>
+                                  {l.triggerWords ? (
+                                    <span className="text-gray-300 text-[10px] font-mono truncate max-w-[150px]" title={l.triggerWords}>
+                                      {l.triggerWords}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-400 text-[10px] italic">no trigger</span>
+                                  )}
+                                  <span className="text-accent text-[10px] font-bold font-mono">{l.weight.toFixed(2)}</span>
+                                  <button
+                                    onClick={() => setPixaiLoras((prev) => prev.filter((x) => x.versionId !== l.versionId))}
+                                    className="p-0.5 rounded-full bg-transparent border-none cursor-pointer hover:bg-foreground"
+                                  >
+                                    <X size={9} color="#888" />
+                                  </button>
+                                </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-gray-300 text-[11px] mt-1.5 m-0">
+                        {pixaiToken.trim()
+                          ? 'Browse searches the pixai.art catalog. LoRAs only stack on the checkpoint they were trained for, so changing the checkpoint clears them.'
+                          : 'Paste a token above to browse the catalog.'}
+                      </p>
+                    </div>
 
                     <div className="mt-6 pt-5 border-t border-foreground flex items-center justify-between">
                       <div>
@@ -3142,6 +3597,11 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
 
                     <p className="text-gray-500 text-[12px] leading-5 m-0">
                       ElevenLabs uses the key configured on the server (ELEVENLABS_API_KEY).
+                    </p>
+
+                    <p className="text-gray-500 text-[11px] leading-5 mt-1.5 m-0">
+                      Inworld Speech-to-Speech (fast-lane call mode) is now configured per-character —
+                      open a character's editor to turn it on for that character.
                     </p>
 
                     <div className="mt-6 pt-5 border-t border-foreground">
@@ -3892,6 +4352,238 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
                 </div>
               )}
 
+              {tab === 'backup' && (
+                <div className="flex flex-col h-full overflow-hidden">
+                  <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
+                    <span className="text-white font-semibold text-[14px]">Backup</span>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto px-6 py-5">
+                    <input
+                      ref={restoreFileRef}
+                      type="file"
+                      accept=".gz,.tgz,application/gzip,application/x-gzip"
+                      className="hidden"
+                      onChange={(e) => {
+                        setRestoreFile(e.target.files?.[0] ?? null);
+                        setRestoreResult(null);
+                        e.target.value = '';
+                      }}
+                    />
+
+                    <p className={sectionGroupLabel}>EXPORT</p>
+
+                    <SettingsSection
+                      icon={<Download size={14} />}
+                      title="Export everything"
+                      subtitle="Packs the whole database plus your files into a single .tar.gz — characters, chats, memories, skills, routines, automations, voice presets, integrations and settings."
+                      action={
+                        <motion.button
+                          onClick={downloadBackup}
+                          whileHover={{ scale: 1.04 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border-none cursor-pointer transition-colors bg-accent hover:bg-accent/80"
+                        >
+                          <Download size={12} color="#fff" />
+                          <span className="text-white font-semibold text-[12px]">Export</span>
+                        </motion.button>
+                      }
+                    >
+                      <div className="rounded-xl bg-background px-4 py-3 mb-3">
+                        {backupInfo ? (
+                          <>
+                            <div className="flex items-center justify-between py-1">
+                              <span className="text-gray-300 text-[12px]">Database</span>
+                              <span className="text-white text-[12px] font-semibold">
+                                {backupInfo.documents} docs · {backupInfo.collections.length} collections
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between py-1">
+                              <span className="text-gray-300 text-[12px]">Uploads</span>
+                              <span className={`text-[12px] font-semibold ${backupUploads ? 'text-white' : 'text-gray-400 line-through'}`}>
+                                {backupInfo.uploads.files} files · {formatBytes(backupInfo.uploads.bytes)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between py-1">
+                              <span className="text-gray-300 text-[12px]">Knowledge base</span>
+                              <span className={`text-[12px] font-semibold ${backupKnowledge ? 'text-white' : 'text-gray-400 line-through'}`}>
+                                {backupInfo.knowledge.files} files · {formatBytes(backupInfo.knowledge.bytes)}
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-gray-300 text-[12px] m-0">Reading what's on disk…</p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between py-2">
+                        <div className="min-w-0 pr-3">
+                          <p className="text-white text-[12px] font-semibold m-0">Include uploads</p>
+                          <p className="text-gray-300 text-[11px] mt-0.5 m-0">
+                            Character photos, images sent in chat and voice notes. This is what makes the file big.
+                          </p>
+                        </div>
+                        <Switch size="sm" checked={backupUploads} onChange={() => setBackupUploads((v) => !v)} />
+                      </div>
+
+                      <div className="flex items-center justify-between py-2">
+                        <div className="min-w-0 pr-3">
+                          <p className="text-white text-[12px] font-semibold m-0">Include knowledge base</p>
+                          <p className="text-gray-300 text-[11px] mt-0.5 m-0">
+                            The .md / .txt source files in ~/.elfie/knowledge.
+                          </p>
+                        </div>
+                        <Switch size="sm" checked={backupKnowledge} onChange={() => setBackupKnowledge((v) => !v)} />
+                      </div>
+                    </SettingsSection>
+
+                    <SettingsSection
+                      icon={<AlertTriangle size={14} />}
+                      title="The file holds your secrets"
+                      subtitle="API keys, the Telegram bot token, Google access and refresh tokens and every skill's auth value are inside the export in plain text — that's what makes it restorable. Keep it somewhere private and don't share it."
+                    />
+
+                    <p className="text-gray-300 text-[11px] leading-[1.5] mt-1 mb-0 px-1">
+                      Not included: workflow run history and the vector index in ~/.elfie/lancedb. The index is
+                      rebuilt from the knowledge files with Knowledge → Reindex.
+                    </p>
+
+                    <p className={`${sectionGroupLabel} mt-6`}>RESTORE</p>
+
+                    <section className="rounded-2xl bg-foreground p-4 mb-2.5">
+                      <div className="flex items-start gap-3">
+                        <div className="w-7 h-7 rounded-lg bg-destructive/[0.12] flex items-center justify-center flex-shrink-0">
+                          <Upload size={14} className="text-destructive" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white font-semibold text-[13px] m-0 leading-[1.6]">Restore from a backup</p>
+                          <p className="text-gray-300 text-[11px] leading-[1.5] mt-1 m-0">
+                            Every collection in the file <span className="text-destructive font-semibold">replaces</span> what
+                            you have now — characters, chats, skills, routines, automations and settings are wiped and rewritten.
+                            Files are copied over the top; existing ones that aren't in the backup stay. A snapshot of your
+                            current database is saved to ~/.elfie/backups first, just in case.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3.5">
+                        <button
+                          onClick={() => restoreFileRef.current?.click()}
+                          className="flex items-center gap-2 w-full bg-background border border-background rounded-xl px-4 py-2.5 cursor-pointer text-left"
+                        >
+                          <FileText size={13} className="text-gray-400 flex-shrink-0" />
+                          {restoreFile ? (
+                            <span className="text-white text-[13px] font-medium truncate">
+                              {restoreFile.name} · {formatBytes(restoreFile.size)}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-[13px]">Choose a .tar.gz backup…</span>
+                          )}
+                        </button>
+
+                        <AnimatePresence initial={false}>
+                          {restoreFile && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <p className="text-gray-400 text-[10px] font-bold tracking-widest mt-3.5 mb-2 m-0">
+                                TYPE REPLACE TO CONFIRM
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={restoreConfirm}
+                                  onChange={(e) => setRestoreConfirm(e.target.value)}
+                                  placeholder="REPLACE"
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                  className="text-white text-[13px] bg-background border border-background rounded-xl px-3.5 py-2.5 outline-none flex-1 placeholder:text-gray-400"
+                                />
+                                <motion.button
+                                  onClick={runRestore}
+                                  disabled={restoring || restoreConfirm.trim().toUpperCase() !== 'REPLACE'}
+                                  whileHover={{ scale: 1.03 }}
+                                  whileTap={{ scale: 0.96 }}
+                                  className="flex items-center gap-2 py-2.5 px-4 rounded-xl border border-destructive/30 bg-transparent cursor-pointer hover:bg-destructive/10 transition-colors disabled:opacity-40 flex-shrink-0 min-w-[104px] justify-center"
+                                >
+                                  {restoring
+                                    ? <div className="w-3.5 h-3.5 rounded-full border-2 border-destructive border-t-transparent spin" />
+                                    : <span className="text-destructive font-semibold text-[12px]">Restore</span>}
+                                </motion.button>
+                              </div>
+                              {restoring && (
+                                <p className="text-gray-300 text-[11px] mt-2 m-0">
+                                  Uploading and restoring — don't close this window.
+                                </p>
+                              )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </section>
+
+                    {restoreResult && (
+                      <motion.section
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="rounded-2xl bg-foreground p-4 mb-2.5"
+                      >
+                        <div className="flex items-center gap-2 mb-3">
+                          <CheckCircle2 size={14} className="text-accent" />
+                          <p className="text-white font-semibold text-[13px] m-0">Restore finished</p>
+                        </div>
+                        <div className="rounded-xl bg-background px-4 py-3">
+                          {Object.entries(restoreResult.restored).map(([name, count]) => (
+                            <div key={name} className="flex items-center justify-between py-0.5">
+                              <span className="text-gray-300 text-[12px]">{name}</span>
+                              <span className="text-white text-[12px] font-semibold">{count}</span>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between py-0.5">
+                            <span className="text-gray-300 text-[12px]">files restored</span>
+                            <span className="text-white text-[12px] font-semibold">
+                              {restoreResult.uploadFiles + restoreResult.knowledgeFiles}
+                            </span>
+                          </div>
+                        </div>
+                        {restoreResult.needsReindex && (
+                          <p className="text-gray-300 text-[11px] leading-[1.5] mt-3 m-0">
+                            Knowledge files came back — run Knowledge → Reindex to rebuild the vector index so
+                            she can search them again.
+                          </p>
+                        )}
+                        <p className="text-gray-300 text-[11px] leading-[1.5] mt-2 m-0">
+                          Your previous database was saved to <span className="text-gray-300 font-mono">{restoreResult.snapshot}</span>.
+                          Reload the app to be sure everything on screen is fresh.
+                        </p>
+                      </motion.section>
+                    )}
+
+                    {backupInfo && backupInfo.snapshots.length > 0 && (
+                      <>
+                        <p className={`${sectionGroupLabel} mt-6`}>PRE-RESTORE SNAPSHOTS</p>
+                        <section className="rounded-2xl bg-foreground p-4">
+                          <p className="text-gray-300 text-[11px] leading-[1.5] mt-0 mb-3">
+                            Database-only copies taken automatically before each restore, kept in{' '}
+                            <span className="font-mono">{backupInfo.snapshotDir}</span>. The 5 most recent are kept.
+                          </p>
+                          {backupInfo.snapshots.map((snap) => (
+                            <div key={snap.name} className="flex items-center justify-between py-1">
+                              <span className="text-gray-300 text-[11px] font-mono truncate pr-3">{snap.name}</span>
+                              <span className="text-gray-300 text-[11px] flex-shrink-0">{formatBytes(snap.bytes)}</span>
+                            </div>
+                          ))}
+                        </section>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {tab === 'debug' && (
                 <div className="flex flex-col h-full overflow-hidden">
                   <div className="px-6 py-4 border-b border-foreground flex-shrink-0 pr-12">
@@ -3923,6 +4615,14 @@ export default function SettingsScreen({ visible, onClose, onCharacterActivated 
           </motion.div>
 
           <DebugPanel visible={showDebug} onClose={() => setShowDebug(false)} />
+
+          <PixaiModelPicker
+            open={showPixaiPicker}
+            onClose={() => setShowPixaiPicker(false)}
+            model={pixaiModel}
+            loras={pixaiLoras}
+            onChange={({ model, loras }) => { setPixaiModel(model); setPixaiLoras(loras); }}
+          />
         </motion.div>
       )}
     </AnimatePresence>

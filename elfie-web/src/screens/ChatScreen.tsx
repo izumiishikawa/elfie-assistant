@@ -40,6 +40,7 @@ import ShimmerPlaceholder from "../components/SkeletonLoading";
 import SkillNeuronGraph from "../components/SkillNeuronGraph";
 import SettingsScreen from "./SettingsScreen";
 import CallOverlay from "./CallOverlay";
+import InworldCallOverlay from "./InworldCallOverlay";
 import { useSettingsStore } from "../stores/mainStore";
 import { useSkillsStore } from "../stores/skillsStore";
 import { useIntegrationsStore } from "../stores/integrationsStore";
@@ -269,12 +270,7 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
   search_products: "searching for products...",
   save_memory: "saving memory...",
   execute_command: "running command...",
-  generate_pixel_art: "generating pixel art...",
-  generate_pixel_art_pro: "generating pixel art (pro)...",
-  convert_to_pixel_art: "converting...",
-  convert_to_pixel_art_pro: "converting...",
-  remove_background: "removing background...",
-  generate_with_style: "generating with style...",
+  generate_anime_image: "drawing the image...",
   generate_image: "generating image...",
   edit_image: "editing image...",
   send_gif: "looking for a gif...",
@@ -292,12 +288,7 @@ const TOOL_ERROR_LABELS: Record<string, string> = {
   browse_screenshot: "screenshot failed",
   search_products: "search failed",
   execute_command: "command failed",
-  generate_pixel_art: "generation failed",
-  generate_pixel_art_pro: "generation failed",
-  convert_to_pixel_art: "conversion failed",
-  convert_to_pixel_art_pro: "conversion failed",
-  remove_background: "removal failed",
-  generate_with_style: "generation failed",
+  generate_anime_image: "generation failed",
   generate_image: "generation failed",
   edit_image: "edit failed",
   create_skill: "failed to create tool",
@@ -314,12 +305,7 @@ const TOOL_ACTIVITY_ICONS: Record<string, LucideIcon> = {
   search_products: Search,
   save_memory: Brain,
   execute_command: Terminal,
-  generate_pixel_art: Image,
-  generate_pixel_art_pro: Image,
-  convert_to_pixel_art: Image,
-  convert_to_pixel_art_pro: Image,
-  remove_background: Image,
-  generate_with_style: Image,
+  generate_anime_image: Image,
   generate_image: Image,
   edit_image: Image,
   send_gif: Sparkles,
@@ -1717,65 +1703,9 @@ const MessageItem = memo(
                     label: "memory saved",
                     icon: <Pen size={8} color="#d1d5db" />,
                   },
-                  generate_pixel_art: {
-                    label: "pixel art generated",
-                    icon: (
-                      <PixelGridIcon
-                        size={10}
-                        color="#d1d5db"
-                        dimColor="rgba(209,213,219,0.3)"
-                      />
-                    ),
-                  },
-                  generate_pixel_art_pro: {
-                    label: "pixel art pro",
-                    icon: (
-                      <PixelGridIcon
-                        size={10}
-                        color="#d1d5db"
-                        dimColor="rgba(209,213,219,0.3)"
-                      />
-                    ),
-                  },
-                  convert_to_pixel_art: {
-                    label: "pixel art",
-                    icon: (
-                      <PixelGridIcon
-                        size={10}
-                        color="#d1d5db"
-                        dimColor="rgba(209,213,219,0.3)"
-                      />
-                    ),
-                  },
-                  convert_to_pixel_art_pro: {
-                    label: "pixel art pro",
-                    icon: (
-                      <PixelGridIcon
-                        size={10}
-                        color="#d1d5db"
-                        dimColor="rgba(209,213,219,0.3)"
-                      />
-                    ),
-                  },
-                  generate_with_style: {
-                    label: "generated with style",
-                    icon: (
-                      <PixelGridIcon
-                        size={10}
-                        color="#d1d5db"
-                        dimColor="rgba(209,213,219,0.3)"
-                      />
-                    ),
-                  },
-                  remove_background: {
-                    label: "background removed",
-                    icon: (
-                      <PixelGridIcon
-                        size={10}
-                        color="#d1d5db"
-                        dimColor="rgba(209,213,219,0.3)"
-                      />
-                    ),
+                  generate_anime_image: {
+                    label: "image generated",
+                    icon: <Image size={8} color="#d1d5db" />,
                   },
                   web_search: {
                     label: "web search",
@@ -2015,47 +1945,6 @@ const ChatsDrawer = memo(
 );
 
 
-const PixelGridIcon = memo(
-  ({
-    size = 16,
-    color = "#fff",
-    dimColor = "rgba(255,255,255,0.18)",
-  }: {
-    size?: number;
-    color?: string;
-    dimColor?: string;
-  }) => {
-    const cell = size / 4;
-    const gap = Math.max(0.5, cell / 4);
-    const total = cell * 4 + gap * 3;
-    const pattern = [
-      [1, 0, 1, 0],
-      [0, 1, 0, 1],
-      [1, 0, 1, 0],
-      [0, 1, 0, 1],
-    ];
-    return (
-      <svg width={total} height={total} viewBox={`0 0 ${total} ${total}`}>
-        {pattern.map((row, r) =>
-          row.map((on, c) => (
-            <rect
-              key={`${r}-${c}`}
-              x={c * (cell + gap)}
-              y={r * (cell + gap)}
-              width={cell}
-              height={cell}
-              fill={on ? color : dimColor}
-            />
-          )),
-        )}
-      </svg>
-    );
-  },
-);
-
-type PixelLabActionId = "force";
-
-
 export default function ChatScreen() {
   const [chats, setChats] = useState<ChatMeta[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
@@ -2082,8 +1971,6 @@ export default function ChatScreen() {
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [fullscreenOpenId, setFullscreenOpenId] = useState(0);
   const [avatarModal, setAvatarModal] = useState<{ uri: string; name: string } | null>(null);
-  const [pixelLabActiveId, setPixelLabActiveId] =
-    useState<PixelLabActionId | null>(null);
   const [forceThinking, setForceThinking] = useState(false);
   const [forcePro, setForcePro] = useState(false);
   const [showExtrasMenu, setShowExtrasMenu] = useState(false);
@@ -2104,7 +1991,7 @@ export default function ChatScreen() {
   const isCancelledRef = useRef(false);
   const currentAiMsgIdRef = useRef<string | null>(null);
 
-  const { aiName, aiPhoto, userPhoto, loadSettings, activeCharacterId, llmProvider } =
+  const { aiName, aiPhoto, userPhoto, loadSettings, activeCharacterId, llmProvider, activeCharacter } =
     useSettingsStore();
 
   const showToolActivity = useCallback((toolName: string, detail?: string) => {
@@ -2540,11 +2427,9 @@ export default function ChatScreen() {
 
       const imagesToSend = selectedImages;
       const currentReplyTo = replyingTo;
-      const forcePixelLab = pixelLabActiveId !== null;
       setMessage("");
       setSelectedImages([]);
       setReplyingTo(null);
-      setPixelLabActiveId(null);
       setIsAiTyping(true);
       forceClearToolActivity();
 
@@ -2605,7 +2490,6 @@ export default function ChatScreen() {
             body: JSON.stringify({
               content: text,
               imageFilenames: filenames,
-              forcePixelLab,
               forceNeuro: neuroMode,
               forceThinking,
               forcePro,
@@ -3032,7 +2916,6 @@ export default function ChatScreen() {
       lastChatKey,
       subscribeToNeuroStream,
       neuroMode,
-      pixelLabActiveId,
       forceThinking,
       forcePro,
       showToolActivity,
@@ -3610,7 +3493,7 @@ export default function ChatScreen() {
                     >
                       <Sparkles
                         size={15}
-                        color={pixelLabActiveId !== null || neuroMode || forceThinking || forcePro ? "var(--accent)" : "#6b7280"}
+                        color={neuroMode || forceThinking || forcePro ? "var(--accent)" : "#6b7280"}
                       />
                     </motion.button>
 
@@ -3779,12 +3662,20 @@ export default function ChatScreen() {
 
       <AnimatePresence>
         {showCall && activeChatId && (
-          <CallOverlay
-            chatId={activeChatId}
-            characterName={aiName}
-            characterAvatar={aiPhoto ? `${API_BASE}/files/${aiPhoto}` : null}
-            onClose={() => setShowCall(false)}
-          />
+          activeCharacter?.inworldRealtimeEnabled ? (
+            <InworldCallOverlay
+              characterName={aiName}
+              characterAvatar={aiPhoto ? `${API_BASE}/files/${aiPhoto}` : null}
+              onClose={() => setShowCall(false)}
+            />
+          ) : (
+            <CallOverlay
+              chatId={activeChatId}
+              characterName={aiName}
+              characterAvatar={aiPhoto ? `${API_BASE}/files/${aiPhoto}` : null}
+              onClose={() => setShowCall(false)}
+            />
+          )
         )}
       </AnimatePresence>
 

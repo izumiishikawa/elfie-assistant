@@ -1,0 +1,721 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function () {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W, H, CX, CY;
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    CX = W / 2; CY = H / 2;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // One-shot, self-driven 4-beat sequence — spawned by daemon/elfie_daemon.py's
+  // _spawn_skill_evolution_overlay via elfie_overlay.py's 'skill_evolution' mode when
+  // forge_skill fires. No stdin control loop like great_sage.html's small corner
+  // emblem — the whole timeline plays once from a single query param and the daemon
+  // just fades the GTK window out once it's done (SKILL_EVOLUTION_HOLD_MS in
+  // elfie_overlay.py's Python side).
+  //
+  // Beats mirror actual Great Sage anime stingers (per reference screenshots):
+  //   1. KOKU (告, "declare")  — diamond frame, radial ray burst
+  //   2. BURST                — quick chromatic flash/wipe between beats
+  //   3. TITLE CARD           — full-width wavy-edge bar, kanji + great_sage_line
+  //   4. AMBIENT (indefinite) — she's actually still working (web_fetch, test_skill,
+  //      edit_skill, test_skill again — can take way longer than the ~3.5s above), so
+  //      this loops for as long as it takes instead of a fixed timer. Ends only when
+  //      Python calls window.resolveForge(...) below, driven by elfie_daemon.py's
+  //      'skill_evolution_resolve' action — which only fires when test_skill actually
+  //      confirms success server-side, not a guess.
+  //   5. ZE (是, "confirmed") or 否 ("failed") — diamond frame, falling-particle "rain"
+  //      backdrop, ACQUIRED/FAILED caption, then fades — Python closes the window
+  //      shortly after (RESOLVE_FADE_DELAY_MS in elfie_overlay.py).
+  let payload = {};
+  try { payload = JSON.parse(new URLSearchParams(location.search).get('data') || '{}'); } catch {}
+  const GREAT_SAGE_LINE = (payload.line || '').trim().toUpperCase() || 'FORGING NEW SKILL';
+  const SKILL_NAME = (payload.skillName || '').trim();
+  // Preview mode for tuning — payload.stage pins the render to ONE beat, held forever,
+  // instead of racing through the full timeline. Values: koku, burst, title, ambient,
+  // resolve, fail. Pass via elfie_overlay.py's CLI payload, e.g.
+  // '{"line":"...", "skillName":"...", "stage":"title"}'.
+  const PREVIEW_STAGE = (payload.stage || '').trim();
+
+  const T_KOKU_END   = 500;
+  const T_BURST_END  = 900;
+  const T_TITLE_END  = 3550;
+  const RESOLVE_HOLD = 900;
+  const RESOLVE_FADE = 350;
+
+  let resolved = false;
+  let resolvePayload = {};
+  let resolveAt = 0;
+  window.resolveForge = function (data) {
+    resolved = true;
+    resolvePayload = data || {};
+    resolveAt = performance.now();
+  };
+
+  // Reusable mid-work status card: during the ambient (post-title, pre-resolve) phase,
+  // the model can push fresh progress lines here instead of the screen just sitting on
+  // a generic "ANALYZING..." pulse the whole time — e.g. "FETCHING API DOCS...",
+  // "TESTING ENDPOINT...", "ADJUSTING AUTH...". Driven by elfie_daemon.py's
+  // 'skill_evolution_status' action (forge_skill_status tool, chats.controller.js /
+  // inworldRealtime.js). Each call replays the same slide/typewriter cascade for the
+  // new text — not a straight swap.
+  let statusPayload = null;
+  let statusAt = 0;
+  window.updateStatus = function (data) {
+    statusPayload = data || {};
+    statusAt = performance.now();
+  };
+
+  // Transient toasts — interrupt the ambient/status card for a few seconds, then it
+  // reverts on its own. Driven by forge_skill_notice (告/KOKU — general announcement)
+  // and forge_skill_failure (a sub-step failed, NOT the whole flow — she's about to
+  // retry with edit_skill). Neither closes the overlay; only forge_skill_complete
+  // (window.resolveForge, existing) does that.
+  const TRANSIENT_MS = 2600;
+  let transientCard = null; // { kind: 'notice'|'failure', payload, at }
+  window.showNotice = function (data) {
+    transientCard = { kind: 'notice', payload: data || {}, at: performance.now() };
+  };
+  window.showFailure = function (data) {
+    transientCard = { kind: 'failure', payload: data || {}, at: performance.now() };
+  };
+
+  function fadeWindow(elapsedInStage, stageLen, fadeIn, fadeOut) {
+    if (elapsedInStage < fadeIn) return elapsedInStage / fadeIn;
+    if (elapsedInStage > stageLen - fadeOut) return Math.max(0, (stageLen - elapsedInStage) / fadeOut);
+    return 1;
+  }
+
+  // Typewriter reveal — every text on screen types out instead of popping in fully
+  // formed. revealMs is "how long has THIS text specifically been revealing" (each
+  // caller passes its own clock/offset so a card's several lines cascade one after
+  // another instead of all typing in lockstep).
+  const TYPE_CPS = 22;
+  function typed(text, revealMs) {
+    if (!text || revealMs <= 0) return '';
+    const chars = Math.floor((revealMs / 1000) * TYPE_CPS);
+    return text.slice(0, Math.min(text.length, chars));
+  }
+
+  // Kanji get a fancier reveal than the plain typewriter above: each character slides
+  // down into place (ease-out) with a stagger between them, instead of just fading in
+  // or being substring-revealed — reads as a proper cascade, not a typing effect.
+  const SLIDE_STAGGER_MS = 140;
+  const SLIDE_DURATION_MS = 380;
+  function drawSlideChars(text, cx, y, revealMs, font, color, slideDistance) {
+    if (!text) return;
+    ctx.save();
+    ctx.font = font;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const chars = Array.from(text);
+    const widths = chars.map((c) => ctx.measureText(c).width);
+    const totalW = widths.reduce((a, b) => a + b, 0);
+    let x = cx - totalW / 2;
+    chars.forEach((c, i) => {
+      const charMs = revealMs - i * SLIDE_STAGGER_MS;
+      if (charMs > 0) {
+        const p = Math.min(1, charMs / SLIDE_DURATION_MS);
+        const ease = 1 - Math.pow(1 - p, 3);
+        ctx.save();
+        ctx.globalAlpha *= ease;
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.translate(x + widths[i] / 2, y - slideDistance * (1 - ease));
+        ctx.fillText(c, 0, 0);
+        ctx.restore();
+      }
+      x += widths[i];
+    });
+    ctx.restore();
+  }
+
+  // ---- shared primitives ----
+  function drawRadialRays(count, len, spinT, color, lineW) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + spinT;
+      const l = len * (0.7 + 0.3 * Math.sin(spinT * 3 + i));
+      const grad = ctx.createLinearGradient(0, 0, Math.cos(a) * l, Math.sin(a) * l);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = lineW;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * l, Math.sin(a) * l);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function diamondPath(size) {
+    ctx.beginPath();
+    ctx.moveTo(0, -size);
+    ctx.lineTo(size, 0);
+    ctx.lineTo(0, size);
+    ctx.lineTo(-size, 0);
+    ctx.closePath();
+  }
+
+  function drawKanjiDiamond(alpha, kanji, caption, bgVariant, revealMs) {
+    const size = Math.min(W, H) * 0.24;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(CX, CY);
+
+    drawRadialRays(24, Math.min(W, H) * 0.55, t * (bgVariant === 'rain' ? 0.4 : 0.9),
+      bgVariant === 'rain' ? 'rgba(180,210,255,0.35)' : 'rgba(255,255,255,0.4)', 1.4);
+
+    if (bgVariant === 'rain') {
+      // falling particle "rain" — distinct from the radiating burst used for KOKU
+      for (let i = 0; i < rainDrops.length; i++) {
+        const d = rainDrops[i];
+        ctx.strokeStyle = `rgba(200,225,255,${0.25 + d.a * 0.5})`;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(d.x, d.y);
+        ctx.lineTo(d.x - 6, d.y - 26);
+        ctx.stroke();
+      }
+    }
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(200,225,255,0.6)';
+    ctx.shadowBlur = 36;
+    ctx.fillStyle = 'rgba(4,5,9,0.95)';
+    diamondPath(size);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(235,242,255,0.95)';
+    ctx.lineWidth = 3;
+    diamondPath(size);
+    ctx.stroke();
+    diamondPath(size * 0.86);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(235,242,255,0.5)';
+    ctx.stroke();
+
+    const rev = revealMs ?? 99999;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    drawSlideChars(
+      kanji, 0, -size * 0.08, rev,
+      `${Math.floor(size * 0.62)}px "Noto Serif JP", "Noto Sans JP", "Noto Sans CJK JP", serif`,
+      '#f5f8ff', size * 0.55,
+    );
+
+    if (caption) {
+      ctx.font = '600 20px system-ui, "Noto Sans JP", sans-serif';
+      ctx.fillStyle = 'rgba(230,240,255,0.9)';
+      ctx.fillText(typed(caption, rev - 250), 0, size * 1.24);
+    }
+    ctx.restore();
+  }
+
+  function tiltedSquarePath(size) {
+    // A square cocked ~18° — deliberately NOT the 45° diamond used for KOKU/ZE, so a
+    // failure reads as visually distinct at a glance, not just "diamond but red".
+    ctx.beginPath();
+    ctx.moveTo(-size, -size);
+    ctx.lineTo(size, -size);
+    ctx.lineTo(size, size);
+    ctx.lineTo(-size, size);
+    ctx.closePath();
+  }
+
+  // 失敗した (shipaishita, "it failed") — red, tilted-square frame, hazard-stripe
+  // diagonal band, jittery/glitchy burst instead of the clean radial one. Distinct on
+  // purpose from the KOKU/ZE diamond so a failure is unmistakable even out of the
+  // corner of your eye. Transient (see TRANSIENT_MS) — a sub-step failing doesn't end
+  // the whole forge_skill flow, she's about to retry with edit_skill.
+  function drawFailureScreen(alpha, payload, revealMs) {
+    const size = Math.min(W, H) * 0.26;
+    const line = (payload.line || '').trim().toUpperCase();
+    const name = (payload.skillName || SKILL_NAME || '').trim().toUpperCase();
+    const caption = line || (name ? `${name} FAILED` : 'FAILED');
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(CX, CY);
+    ctx.rotate((18 * Math.PI) / 180);
+
+    // Jittery red burst instead of the smooth rotation used elsewhere — reads as
+    // malfunctioning/glitchy rather than a clean system report.
+    const jitter = (Math.random() - 0.5) * 0.06;
+    drawRadialRays(20, Math.min(W, H) * 0.5, t * 2.4 + jitter, 'rgba(255,70,60,0.4)', 1.6);
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,60,50,0.65)';
+    ctx.shadowBlur = 40;
+    ctx.fillStyle = 'rgba(28,3,3,0.95)';
+    tiltedSquarePath(size);
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,110,100,0.95)';
+    ctx.lineWidth = 3;
+    tiltedSquarePath(size);
+    ctx.stroke();
+
+    // Hazard-stripe diagonal band across the frame.
+    ctx.save();
+    tiltedSquarePath(size);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(255,214,80,0.5)';
+    ctx.lineWidth = size * 0.16;
+    for (let d = -size * 2; d < size * 2; d += size * 0.42) {
+      ctx.beginPath();
+      ctx.moveTo(d, -size * 2);
+      ctx.lineTo(d + size * 2, size * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    const rev = revealMs ?? 99999;
+    ctx.rotate((-18 * Math.PI) / 180);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    drawSlideChars(
+      '失敗', 0, -size * 0.06, rev,
+      `${Math.floor(size * 0.58)}px "Noto Serif JP", "Noto Sans JP", "Noto Sans CJK JP", serif`,
+      '#fff2f0', size * 0.55,
+    );
+    if (caption) {
+      ctx.font = '700 20px system-ui, "Noto Sans JP", sans-serif';
+      ctx.fillStyle = 'rgba(255,220,215,0.95)';
+      ctx.fillText(typed(caption, rev - 250), 0, size * 1.3);
+    }
+    ctx.restore();
+  }
+
+  function drawBurstTransition(p) {
+    // p: 0..1 progress through the beat — fast expanding chromatic ring flash
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.globalCompositeOperation = 'lighter';
+    const maxR = Math.max(W, H) * 0.75;
+    const colors = ['rgba(255,214,150,0.5)', 'rgba(180,255,235,0.5)', 'rgba(200,210,255,0.5)'];
+    colors.forEach((color, i) => {
+      const r = maxR * Math.min(1, p * 1.4 + i * 0.08);
+      const a = Math.max(0, 1 - p * 1.3);
+      ctx.strokeStyle = color.replace(/[\d.]+\)$/, `${(0.5 * a).toFixed(3)})`);
+      ctx.lineWidth = 3 + i;
+      ctx.beginPath();
+      ctx.arc(2 - i * 2, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    drawRadialRays(30, maxR, t * 2.2, `rgba(255,255,255,${0.5 * Math.max(0, 1 - p)})`, 2);
+    const flashA = Math.max(0, 1 - p * 3);
+    if (flashA > 0.01) {
+      ctx.fillStyle = `rgba(255,255,255,${flashA * 0.6})`;
+      ctx.fillRect(-W, -H, W * 2, H * 2);
+    }
+    ctx.restore();
+  }
+
+  // ---- backdrop for the title-card beat: icosahedron wireframe + rings + particles ----
+  const PHI = (1 + Math.sqrt(5)) / 2;
+  const rawVerts = [
+    [-1, PHI, 0], [1, PHI, 0], [-1, -PHI, 0], [1, -PHI, 0],
+    [0, -1, PHI], [0, 1, PHI], [0, -1, -PHI], [0, 1, -PHI],
+    [PHI, 0, -1], [PHI, 0, 1], [-PHI, 0, -1], [-PHI, 0, 1],
+  ];
+  const verts = rawVerts.map(([x, y, z]) => {
+    const l = Math.hypot(x, y, z);
+    return [x / l, y / l, z / l];
+  });
+  const edges = [
+    [0,1],[0,5],[0,7],[0,10],[0,11],
+    [1,5],[1,7],[1,8],[1,9],
+    [2,3],[2,4],[2,6],[2,10],[2,11],
+    [3,4],[3,6],[3,8],[3,9],
+    [4,5],[4,9],[4,11],
+    [5,9],[5,11],
+    [6,7],[6,8],[6,10],
+    [7,8],[7,10],
+    [8,9],
+    [10,11],
+  ];
+  function rotatePoint([x, y, z], ax, ay, az) {
+    let y1 = y * Math.cos(ax) - z * Math.sin(ax);
+    let z1 = y * Math.sin(ax) + z * Math.cos(ax);
+    let x2 = x * Math.cos(ay) + z1 * Math.sin(ay);
+    let z2 = -x * Math.sin(ay) + z1 * Math.cos(ay);
+    let x3 = x2 * Math.cos(az) - y1 * Math.sin(az);
+    let y3 = x2 * Math.sin(az) + y1 * Math.cos(az);
+    return [x3, y3, z2];
+  }
+  function project([x, y, z], scale, dist) {
+    const f = dist / (dist - z);
+    return [x * f * scale, y * f * scale];
+  }
+  function drawRing(radius, rot, squash, color, dash, width) {
+    ctx.save();
+    ctx.rotate(rot);
+    ctx.scale(1, squash);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius, radius, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const particles = [];
+  function spawnParticle() {
+    particles.push({
+      angle: Math.random() * Math.PI * 2,
+      speed: 0.6 + Math.random() * 1.6,
+      r: 10 + Math.random() * 14,
+      size: 1 + Math.random() * 2.4,
+      life: 1,
+      decay: 0.0018 + Math.random() * 0.004,
+    });
+  }
+  let rotX = Math.random() * 10, rotY = Math.random() * 10, rotZ = Math.random() * 10;
+  let ringRot1 = 0, ringRot2 = Math.PI / 3;
+
+  function drawTitleBackdrop(dt, alpha) {
+    const baseR = Math.min(W, H) * 0.30;
+    const coreR = baseR * 0.15;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(CX, CY);
+    ctx.globalCompositeOperation = 'lighter';
+
+    drawRadialRays(18, baseR * 1.5, t * 0.06, 'rgba(210,240,255,0.4)', 1.3);
+
+    ringRot1 += 0.012; ringRot2 -= 0.009;
+    drawRing(baseR * 1.05, ringRot1, 0.32, 'rgba(200,255,225,0.4)', [22, 10, 4, 10], 2.8);
+    drawRing(baseR * 1.18, ringRot2, 0.5, 'rgba(255,214,150,0.35)', [30, 8], 2);
+
+    rotX += 0.006 * dt * 60; rotY += 0.009 * dt * 60; rotZ += 0.004 * dt * 60;
+    const proj = verts.map((v) => project(rotatePoint(v, rotX, rotY, rotZ), coreR * 2.4, 3));
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    for (const [a, b] of edges) {
+      ctx.beginPath();
+      ctx.moveTo(proj[a][0], proj[a][1]);
+      ctx.lineTo(proj[b][0], proj[b][1]);
+      ctx.stroke();
+    }
+
+    if (Math.random() < 0.4) spawnParticle();
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.r += p.speed; p.life -= p.decay;
+      if (p.life <= 0 || p.r > baseR * 2.4) { particles.splice(i, 1); continue; }
+      const x = Math.cos(p.angle) * p.r, y = Math.sin(p.angle) * p.r;
+      ctx.fillStyle = `rgba(235,250,255,${p.life * 0.7})`;
+      ctx.beginPath();
+      ctx.arc(x, y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function wrapLine(text, maxChars) {
+    if (text.length <= maxChars) return [text];
+    const words = text.split(' ');
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      if ((cur + ' ' + w).trim().length > maxChars && cur) { lines.push(cur.trim()); cur = w; }
+      else cur = (cur + ' ' + w).trim();
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
+  // CRT-tube warp: top/bottom edges are a smooth arc instead of a straight line — flat
+  // in the middle, corners pulled UP (toward each other, pinching the ribbon thinner at
+  // the ends) — like a straight bar wrapped around a curved tube screen. Quadratic
+  // curve, not the old sine-wave wobble (that one looked broken, this is one smooth arc).
+  function crtRibbonPath(halfW, halfH, curve) {
+    ctx.beginPath();
+    ctx.moveTo(-halfW, -halfH - curve);
+    ctx.quadraticCurveTo(0, -halfH + curve, halfW, -halfH - curve);
+    ctx.lineTo(halfW, halfH + curve);
+    ctx.quadraticCurveTo(0, halfH - curve, -halfW, halfH + curve);
+    ctx.closePath();
+  }
+
+  function drawTitleCard(alpha, kanji, eyebrow, bodyLines, revealMs) {
+    if (alpha <= 0.01) return;
+    // Ribbon WIDTH bleeds past both screen edges (120%) so no seam is ever visible —
+    // height stays as the normal letterbox-bar proportion, this isn't about darkening
+    // the whole screen, just making sure the bar's own ends never show.
+    const cardW = W * 1.2;
+    const cardH = Math.min(H * 0.36, 380);
+    const curve = cardH * 0.5;
+
+    const rev = revealMs ?? 99999;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(CX, CY);
+
+    // CRT power-on: the ribbon starts as a thin horizontal line at the center and
+    // expands vertically to full height — a tube TV switching on, opening from inside
+    // out — instead of just fading/popping in. Only scales the ribbon shape, not the
+    // text below, so the kanji/lines don't get squished.
+    const POWERON_MS = 320;
+    const powerOnP = Math.min(1, Math.max(0, rev) / POWERON_MS);
+    const powerOnScale = 0.025 + 0.975 * (1 - Math.pow(1 - powerOnP, 3));
+
+    // Clean black ribbon, CRT-curved top/bottom edges, thin white border — matches the
+    // reference's letterbox bar but bent like it's sitting on a curved tube screen
+    // (a first pass used a sine-wave wobble here instead; looked broken, not this).
+    ctx.save();
+    ctx.scale(1, powerOnScale);
+    ctx.save();
+    ctx.shadowColor = 'rgba(200,230,255,0.5)';
+    ctx.shadowBlur = 46;
+    ctx.fillStyle = 'rgba(4,5,9,0.94)';
+    crtRibbonPath(cardW / 2, cardH / 2, curve);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(245,248,255,0.95)';
+    ctx.lineWidth = 2;
+    crtRibbonPath(cardW / 2, cardH / 2, curve);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255,214,150,0.9)';
+    ctx.font = '600 20px system-ui, "Noto Sans JP", sans-serif';
+    ctx.save();
+    ctx.letterSpacing = '6px';
+    ctx.fillText(typed(eyebrow, rev - POWERON_MS), 0, -cardH * 0.30);
+    ctx.restore();
+
+    drawSlideChars(
+      kanji, 0, -cardH * 0.02, rev - POWERON_MS - 350,
+      `${Math.floor(cardH * 0.32)}px "Noto Serif JP", "Noto Sans JP", "Noto Sans CJK JP", serif`,
+      '#f5f8ff', cardH * 0.4,
+    );
+
+    ctx.font = '700 26px system-ui, "Noto Sans JP", sans-serif';
+    ctx.fillStyle = 'rgba(240,246,255,0.95)';
+    const lineH = 32;
+    const startY = cardH * 0.30 - ((bodyLines.length - 1) * lineH) / 2;
+    // Cascade: each body line starts typing only after the previous one is fully typed
+    // (its own length / TYPE_CPS), not all lines racing in parallel.
+    let lineStart = rev - POWERON_MS - 750;
+    bodyLines.forEach((ln, i) => {
+      ctx.fillText(typed(ln, lineStart), 0, startY + i * lineH);
+      lineStart -= (ln.length / TYPE_CPS) * 1000 + 120;
+    });
+
+    ctx.restore();
+  }
+
+  // falling "rain" particles for the ZE stinger backdrop
+  const rainDrops = [];
+  for (let i = 0; i < 60; i++) {
+    rainDrops.push({ x: Math.random() * 1600 - 800, y: Math.random() * 1000 - 500, a: Math.random(), speed: 4 + Math.random() * 6 });
+  }
+  function updateRain(dt) {
+    for (const d of rainDrops) {
+      d.y += d.speed * dt * 60;
+      d.x -= d.speed * 0.15 * dt * 60;
+      if (d.y > 500) { d.y = -500; d.x = Math.random() * 1600 - 800; }
+    }
+  }
+
+  // Flying starfield (hyperspace-style streaks from a center vanishing point) — runs
+  // under every beat, not just one stage, so the whole sequence reads as one continuous
+  // dark space rather than flat black cards popping in and out.
+  const STAR_COUNT = 160;
+  const stars = [];
+  function resetStar(s) {
+    s.x = (Math.random() - 0.5) * 2;
+    s.y = (Math.random() - 0.5) * 2;
+    s.z = 0.15 + Math.random() * 0.85;
+    s.speed = 0.35 + Math.random() * 0.65;
+  }
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const s = {};
+    resetStar(s);
+    stars.push(s);
+  }
+  function drawStars(dt) {
+    const reach = Math.max(W, H) * 0.75;
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.globalCompositeOperation = 'lighter';
+    for (const s of stars) {
+      const prevZ = s.z;
+      s.z -= s.speed * dt * 0.5;
+      if (s.z <= 0.02) { resetStar(s); continue; }
+      const k0 = 1 / prevZ, k1 = 1 / s.z;
+      const x0 = s.x * k0 * 40, y0 = s.y * k0 * 40;
+      const x1 = s.x * k1 * 40, y1 = s.y * k1 * 40;
+      if (Math.abs(x1) > reach || Math.abs(y1) > reach) { resetStar(s); continue; }
+      const bright = Math.min(1, (1 - s.z) * 1.4);
+      ctx.strokeStyle = `rgba(215,232,255,${bright})`;
+      ctx.lineWidth = Math.max(0.6, bright * 2.2);
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  let t = 0;
+  const startTime = performance.now();
+
+  function drawAmbientLoop(dt) {
+    drawTitleBackdrop(dt, 0.5);
+
+    if (transientCard) {
+      const since = performance.now() - transientCard.at;
+      if (since < TRANSIENT_MS) {
+        if (transientCard.kind === 'notice') {
+          const a = fadeWindow(since, TRANSIENT_MS, 100, 220);
+          drawKanjiDiamond(a, '告', (transientCard.payload.line || '').trim().toUpperCase(), 'burst', since);
+        } else if (transientCard.kind === 'failure') {
+          const a = fadeWindow(since, TRANSIENT_MS, 100, 220);
+          drawFailureScreen(a, transientCard.payload, since);
+        }
+        return;
+      }
+      transientCard = null; // expired — fall through to status/generic below
+    }
+
+    if (statusPayload) {
+      // Reuses the exact same title-card layout/animation for whatever the model pushed
+      // via window.updateStatus — same cascade, same CRT power-on, just different text.
+      const line = (statusPayload.line || '').trim().toUpperCase();
+      const kanji = (statusPayload.kanji || '').trim() || '解析';
+      const since = performance.now() - statusAt;
+      drawTitleCard(1, kanji, 'GREAT SAGE — STATUS', wrapLine(line || 'WORKING...', 46), since);
+      return;
+    }
+
+    ctx.save();
+    ctx.translate(CX, H * 0.84);
+    ctx.fillStyle = 'rgba(210,235,255,0.95)';
+    ctx.font = '600 18px system-ui, "Noto Sans JP", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.letterSpacing = '4px';
+    // Loops: types out, holds, clears, retypes — never just pops in fully formed.
+    const cycleMs = ('ANALYZING...'.length / TYPE_CPS) * 1000 + 900;
+    const cyclePos = (t * 1000) % (cycleMs + 500);
+    ctx.fillText(typed('ANALYZING...', cyclePos), 0, 0);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawResolveStage(nowMs) {
+    const since = nowMs - resolveAt;
+    const success = resolvePayload.success !== false;
+    const total = RESOLVE_HOLD + RESOLVE_FADE;
+    const a = fadeWindow(Math.min(since, total), total, 80, RESOLVE_FADE);
+    if (success) {
+      const name = (resolvePayload.skillName || SKILL_NAME || '').trim().toUpperCase();
+      drawKanjiDiamond(a, '是', name ? `ACQUIRED: ${name}` : 'ACQUIRED', 'rain', since);
+    } else {
+      // Same red failure treatment as the transient forge_skill_failure toasts — this
+      // is the terminal "gave up / overall flow ended unsuccessful" version of it.
+      drawFailureScreen(a, resolvePayload, since);
+    }
+  }
+
+  function draw(dt, nowMs) {
+    const elapsed = nowMs - startTime;
+
+    if (elapsed < T_KOKU_END) {
+      const a = fadeWindow(elapsed, T_KOKU_END, 120, 140);
+      drawKanjiDiamond(a, '告', 'REQUESTING SKILL FORGE', 'burst', elapsed);
+      return;
+    }
+    if (elapsed < T_BURST_END) {
+      drawBurstTransition((elapsed - T_KOKU_END) / (T_BURST_END - T_KOKU_END));
+      return;
+    }
+    if (elapsed < T_TITLE_END) {
+      const stageElapsed = elapsed - T_BURST_END;
+      const a = fadeWindow(stageElapsed, T_TITLE_END - T_BURST_END, 150, 220);
+      drawTitleBackdrop(dt, a);
+      drawTitleCard(a, '創技', 'GREAT SAGE — ANALYZING', wrapLine(GREAT_SAGE_LINE, 46), stageElapsed);
+      return;
+    }
+    if (!resolved) {
+      drawAmbientLoop(dt);
+      return;
+    }
+    drawResolveStage(nowMs);
+  }
+
+  function drawPreview(dt) {
+    switch (PREVIEW_STAGE) {
+      case 'koku':
+        drawKanjiDiamond(1, '告', 'REQUESTING SKILL FORGE', 'burst', (t * 1000) % 3500);
+        break;
+      case 'burst':
+        drawBurstTransition((t * 0.6) % 1);
+        break;
+      case 'title':
+        drawTitleBackdrop(dt, 1);
+        drawTitleCard(1, '創技', 'GREAT SAGE — ANALYZING', wrapLine(GREAT_SAGE_LINE, 46), (t * 1000) % 6000);
+        break;
+      case 'ambient':
+        drawAmbientLoop(dt);
+        break;
+      case 'status':
+        drawTitleBackdrop(dt, 0.5);
+        drawTitleCard(1, '解析', 'GREAT SAGE — STATUS', wrapLine(GREAT_SAGE_LINE || 'FETCHING API DOCUMENTATION...', 46), (t * 1000) % 6000);
+        break;
+      case 'notice':
+        drawKanjiDiamond(1, '告', GREAT_SAGE_LINE || 'HEADS UP', 'burst', (t * 1000) % 3500);
+        break;
+      case 'resolve':
+        drawKanjiDiamond(1, '是', SKILL_NAME ? `ACQUIRED: ${SKILL_NAME.toUpperCase()}` : 'ACQUIRED', 'rain', (t * 1000) % 3500);
+        break;
+      case 'fail':
+        drawFailureScreen(1, { line: GREAT_SAGE_LINE, skillName: SKILL_NAME }, (t * 1000) % 3500);
+        break;
+      default:
+        drawAmbientLoop(dt);
+    }
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now; t += dt;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(2,3,8,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    drawStars(dt);
+    updateRain(dt);
+    if (PREVIEW_STAGE) drawPreview(dt);
+    else draw(dt, now);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
