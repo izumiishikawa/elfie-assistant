@@ -82,5 +82,11 @@ docker run --rm \
   "$IMAGE" \
   /work/elfie.iss "/O/out"
 
+# O exe fica versionado em installer/ pra quem so quer baixar e instalar. Copiar
+# aqui, e nao so no dist/ ignorado, e o que impede o binario commitado de ficar
+# defasado em relacao ao codigo que ele empacota.
+cp "$DIST/ElfieSetup.exe" "$HERE/ElfieSetup.exe"
+
 echo ""
 echo "==> pronto: $DIST/ElfieSetup.exe ($(du -h "$DIST/ElfieSetup.exe" | cut -f1))"
+echo "==> copiado para installer/ElfieSetup.exe (versionado — lembre de commitar)"

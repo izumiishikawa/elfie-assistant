@@ -19,8 +19,8 @@ You don't need all of these running at once. The API is required for everything 
 ## Windows: one-click installer
 
 If you're on Windows and just want to run Elfie rather than develop it, skip the
-manual steps below and grab `ElfieSetup.exe` from the
-[releases page](https://github.com/izumiishikawa/elfie-assistant/releases). It
+manual steps below and grab
+[`installer/ElfieSetup.exe`](installer/ElfieSetup.exe) (2.8 MB). It
 installs the API, the web app and the daemon, along with private copies of
 Node.js, Python, ffmpeg and MongoDB, and leaves a tray icon that starts and stops
 the three of them. Nothing lands on your system `PATH` and no administrator

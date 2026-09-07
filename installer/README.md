@@ -15,6 +15,12 @@ instalado.
 ./installer/build.sh --stage    # só monta installer/build/, sem compilar
 ```
 
+O build também copia o resultado por cima de `installer/ElfieSetup.exe`, que é
+versionado no repo para quem só quer baixar e instalar. Isso significa que **cada
+rebuild commitado adiciona ~2,8 MB permanentes ao histórico do git** — se um dia
+isso incomodar, o lugar certo para o binário passa a ser um GitHub Release, e aí
+é só apagar o arquivo daqui e apontar o README raiz para lá.
+
 Precisa de Inno Setup **6.3 ou mais novo** (`ArchitecturesAllowed=x64compatible` e
 `CreateDownloadPage` só existem a partir dele) — a tag `latest` da imagem já é.
 
