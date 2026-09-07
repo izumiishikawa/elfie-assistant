@@ -353,7 +353,11 @@ const TOOL_LOG_RESULT_CHARS = 600;
 
 const CHAT_TEMPERATURE = 0.5;
 
-const TOOLS = [
+// Exportado pro bridge de voz do Inworld (inworldRealtime.js) reaproveitar os
+// schemas em vez de manter uma segunda cópia das descrições — a do
+// generate_anime_image sozinha tem 20 linhas de orientação de prompt que
+// sairiam de sincronia no primeiro ajuste.
+export const TOOLS = [
   {
     type: "function",
     function: {

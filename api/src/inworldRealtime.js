@@ -1,5 +1,6 @@
-import { writeFile, unlink } from 'fs/promises';
-import { join } from 'path';
+import { writeFile, unlink, readFile } from 'fs/promises';
+import { join, resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 import { exec } from 'child_process';
@@ -14,6 +15,9 @@ import { executeImageVision } from './visionTools.js';
 import { executeScreenshot } from './screenshotTool.js';
 import { buildToolSchema, runSkill, saveSkillImage, createDynamicSkill, editDynamicSkill } from './dynamicSkills.js';
 import { sendToDaemon } from './neuroStore.js';
+import { generateImage as generateNanoBananaImage, editImage as editNanoBananaImage } from './nanoBanana.js';
+import { generateImage as generatePixaiImage } from './pixai.js';
+import { TOOLS as CHAT_TOOLS } from './controllers/chats.controller.js';
 
 // Bridges the browser (elfie-web/src/screens/InworldCallOverlay.tsx) and the
 // desktop daemon (daemon/elfie_daemon.py, _run_inworld_session) straight to
@@ -37,6 +41,10 @@ import { sendToDaemon } from './neuroStore.js';
 // OpenAI's Realtime protocol and are NOT confirmed against live Inworld traffic.
 // Same caveat as the audio event names: unrecognized events are only logged,
 // never crash the session — watch the console the first few real calls.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Mesma pasta que a API serve em /files e que o daemon baixa pelo open_image.
+const uploadDir = resolve(__dirname, '..', 'uploads');
+
 const INWORLD_WS_URL = 'wss://api.inworld.ai/api/v1/realtime/session?protocol=realtime';
 const UPGRADE_PATH = '/ws/inworld-call';
 
@@ -56,6 +64,90 @@ const VOICE_SKILL_PACKAGE_NAMES = ['levelite_reports'];
 function toRealtimeToolSchema(skill) {
   const { function: fn } = buildToolSchema(skill);
   return { type: 'function', name: fn.name, description: fn.description, parameters: fn.parameters };
+}
+
+// Geração e edição de imagem na ligação. O modo de voz normal exclui essas três
+// (VOICE_HEAVY_EXCLUDED em chats.controller.js) porque numa conversa falada não
+// havia onde a imagem aparecer — com o open_image do daemon abrindo no
+// visualizador do sistema, essa objeção deixou de valer.
+//
+// Os schemas vêm dos mesmos objetos que o chat de texto usa, só achatados pro
+// formato da Realtime API: manter uma segunda cópia das descrições faria a
+// orientação de prompt do generate_anime_image sair de sincronia no primeiro ajuste.
+const IMAGE_TOOL_NAMES = ['generate_image', 'generate_anime_image', 'edit_image'];
+
+const IMAGE_TOOLS = CHAT_TOOLS
+  .filter((t) => IMAGE_TOOL_NAMES.includes(t.function?.name))
+  .map((t) => ({
+    type: 'function',
+    name: t.function.name,
+    description: t.function.description,
+    parameters: t.function.parameters,
+  }));
+
+// Abre cada arquivo gerado na tela do usuário e resume pro modelo. Sem isso ela
+// anunciaria uma imagem que ninguém viu — numa ligação não existe o "displayed
+// above" que o texto das tools promete.
+async function deliverGeneratedImages(filenames, label) {
+  if (!filenames?.length) return `NO IMAGE GENERATED — ${label} returned nothing.`;
+  let opened = 0;
+  for (const filename of filenames) {
+    try {
+      await sendToDaemon({ cmd: 'open_image', filename });
+      opened += 1;
+    } catch (err) {
+      console.error('[inworldRealtime] open_image falhou (daemon offline?):', err.message);
+    }
+  }
+  if (opened === 0) {
+    return `Generated ${filenames.length} image(s), but none could be opened — the desktop daemon is not running. Tell the user that.`;
+  }
+  return `Generated ${filenames.length} image(s); ${opened} opened on the user's screen.`;
+}
+
+async function runImageTool(name, args) {
+  if (name === 'generate_image') {
+    const description = (args.description ?? '').trim();
+    if (!description) return 'No description provided.';
+    const results = await generateNanoBananaImage(description, {
+      pro: args.pro ?? false,
+      aspectRatio: args.aspect_ratio,
+    });
+    return deliverGeneratedImages(results, 'Nano Banana');
+  }
+
+  if (name === 'generate_anime_image') {
+    // o modelo às vezes manda "description"; mesmo apelido que o caminho de texto aceita
+    const prompt = (args.prompt ?? args.description ?? '').trim();
+    if (!prompt) return 'NO IMAGE GENERATED — you must pass a non-empty `prompt`. Call the tool again with one.';
+    try {
+      const results = await generatePixaiImage(prompt, {
+        ...(args.negative_prompt?.trim() && { negativePrompts: args.negative_prompt.trim() }),
+        ...(args.steps && { samplingSteps: args.steps }),
+        ...(args.cfg_scale && { cfgScale: args.cfg_scale }),
+        ...(args.model_id?.trim() && { modelId: args.model_id.trim() }),
+      });
+      return deliverGeneratedImages(results, 'PixAI');
+    } catch (err) {
+      if (err.moderated) {
+        return `NO IMAGE GENERATED — ${err.message} This is PixAI's server-side filter, not a limit of yours. Tell the user plainly that PixAI refused the prompt; do not silently retry the same thing.`;
+      }
+      return `NO IMAGE GENERATED — PixAI failed: ${err.message}. Tell the user it failed; do NOT pretend an image was produced.`;
+    }
+  }
+
+  // edit_image: numa ligação não dá pra anexar arquivo, então o material realista
+  // são imagens que ela mesma acabou de gerar nesta chamada — já estão em uploads/.
+  const filenames = Array.isArray(args.filenames) ? args.filenames.slice(0, 6) : [];
+  if (filenames.length === 0) return 'No filenames provided.';
+  const description = (args.description ?? '').trim();
+  if (!description) return 'No description provided.';
+  const buffers = await Promise.all(filenames.map((f) => readFile(resolve(uploadDir, f))));
+  const results = await editNanoBananaImage(description, buffers, filenames, {
+    pro: args.pro ?? false,
+    aspectRatio: args.aspect_ratio,
+  });
+  return deliverGeneratedImages(results, 'Nano Banana edit');
 }
 
 async function loadVoiceDynamicSkillTools() {
@@ -593,6 +685,15 @@ async function runInworldTool(name, argsJson, skillsByName) {
     return `Overlay resolved for "${trimmedName}".`;
   }
 
+  if (IMAGE_TOOL_NAMES.includes(name)) {
+    try {
+      return await runImageTool(name, args);
+    } catch (err) {
+      console.error(`[inworldRealtime] ${name} falhou:`, err.message);
+      return `NO IMAGE GENERATED — ${name} failed: ${err.message}. Tell the user it failed; do NOT pretend an image was produced.`;
+    }
+  }
+
   const skill = skillsByName?.get(name);
   if (skill) {
     const result = await runSkill(skill, args);
@@ -848,7 +949,7 @@ export function attachInworldRealtimeWS(httpServer) {
           model,
           instructions,
           output_modalities: ['audio', 'text'],
-          ...(toolsEnabled ? { tools: [...INWORLD_TOOLS, ...dynamicSkillTools] } : {}),
+          ...(toolsEnabled ? { tools: [...INWORLD_TOOLS, ...IMAGE_TOOLS, ...dynamicSkillTools] } : {}),
           audio: {
             input: {
               format: { type: 'audio/pcm', rate: 16000 },
