@@ -28,6 +28,11 @@ mkdir -p "$STAGE/app" "$DIST"
 # empacota so o que ja foi commitado gera um bug de "no meu clone funciona".
 copy_tree() {
   local src="$1" dst="$2"
+  # *.tsbuildinfo: o git ignora, mas o rsync nao le .gitignore. Levar o meu junto
+  # nao e so ruido no payload — o `tsc -b` do `npm run build` usa esse arquivo pra
+  # build incremental, entao um tsbuildinfo estranho pode convencer a maquina do
+  # usuario de que ja esta tudo compilado e sair sem gerar dist/ nenhum.
+  #
   # A barra inicial ancora o padrao na RAIZ da copia (api/, elfie-web/, daemon/).
   # Sem ela, `models/` casaria com api/src/models — os models do Mongoose — e o
   # instalador sairia com a API sem Character.js/Settings.js/Workflow.js. So
@@ -39,6 +44,7 @@ copy_tree() {
     --exclude '__pycache__/' \
     --exclude '*.pyc' \
     --exclude '*.log' \
+    --exclude '*.tsbuildinfo' \
     --exclude '/dist/' \
     --exclude '/uploads/' \
     --exclude '/browser-profile/' \

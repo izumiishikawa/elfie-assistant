@@ -32,39 +32,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compilar o instalador
+      - name: Build the installer
         run: ./installer/build.sh
 
-      - name: Conferir se o exe saiu
+      - name: Check the exe was produced
         run: |
-          test -f dist/ElfieSetup.exe || { echo "::error::dist/ElfieSetup.exe não foi gerado"; exit 1; }
+          test -f dist/ElfieSetup.exe || { echo "::error::dist/ElfieSetup.exe was not produced"; exit 1; }
           ls -lh dist/ElfieSetup.exe
 
-      - name: Ler a versão do elfie.iss
+      - name: Read the version from elfie.iss
         id: meta
         run: |
           version="$(sed -n 's/^#define[[:space:]]\+AppVersion[[:space:]]\+"\(.*\)"/\1/p' installer/elfie.iss)"
-          test -n "$version" || { echo "::error::AppVersion não encontrado em installer/elfie.iss"; exit 1; }
+          test -n "$version" || { echo "::error::AppVersion not found in installer/elfie.iss"; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           # run_number no fim porque AppVersion é bumpado à mão: sem ele, dois
           # deploys seguidos sem bump colidiriam na mesma tag e o segundo falharia.
           echo "tag=v$version-build${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
-      - name: Publicar a Release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<EOF
-          Instalador do Windows compilado a partir de \`${GITHUB_SHA:0:7}\`.
+          Windows installer, built from \`${GITHUB_SHA:0:7}\`.
 
-          Baixe o \`ElfieSetup.exe\` abaixo e execute. Ele instala o servidor, o
-          aplicativo web e o daemon do overlay, junto com cópias privadas de
-          Node.js, Python, ffmpeg e MongoDB, e deixa um ícone na bandeja.
-          Não precisa de administrador (exceto um aviso do Windows para o
-          MongoDB, que dá para pular se você já tem um banco).
+          Download \`ElfieSetup.exe\` below and run it. It installs the API, the
+          web app and the desktop daemon, along with private copies of Node.js,
+          Python, ffmpeg and MongoDB, and leaves a tray icon that starts and stops
+          the three of them. No administrator rights are needed, except one prompt
+          for MongoDB that you can skip if you already have a database.
 
-          O Windows vai mostrar um aviso do SmartScreen porque o executável não é
-          assinado: **Mais informações → Executar assim mesmo**.
+          Setup downloads those runtimes from their official sites and resolves the
+          npm/pip dependencies on your machine, so it needs an internet connection
+          and takes 5 to 20 minutes.
+
+          Windows will show a SmartScreen warning because the executable is not
+          code-signed: **More info → Run anyway**.
 
           ---
 
